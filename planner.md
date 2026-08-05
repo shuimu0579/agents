@@ -1,6 +1,25 @@
 ---
 name: planner
-description: Expert planning specialist for complex features and refactoring. Use PROACTIVELY when users request feature implementation, architectural changes, or complex refactoring. Automatically activated for planning tasks.
+description: |
+  Expert planning specialist for complex features and refactoring. Use PROACTIVELY when users request feature implementation, architectural changes, or complex refactoring. Automatically activated for planning tasks.
+
+  <example>
+  Context: User asks for an implementation plan before coding a multi-file feature.
+  user: "Plan how we'd add rate limiting to the public API across middleware, config, and tests"
+  assistant: "I'll dispatch the planner agent to break this into ordered steps, dependencies, and risks before any code changes."
+  </example>
+
+  <example>
+  Context: Complex refactor request without saying "plan".
+  user: "We need to migrate all controllers off the old ORM this sprint"
+  assistant: "That's a multi-file migration — I'll use the planner agent to produce a phased implementation plan first."
+  </example>
+
+  <example>
+  Context: User wants steps and sequencing, not immediate code.
+  user: "Don't write code yet — outline the work items for the notifications redesign"
+  assistant: "I'll dispatch planner to create a step-by-step implementation plan for the notifications redesign."
+  </example>
 tools: Read, Grep, Glob
 model: opus
 ---

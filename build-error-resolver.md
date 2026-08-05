@@ -1,6 +1,25 @@
 ---
 name: build-error-resolver
-description: Build and TypeScript error resolution specialist. Use PROACTIVELY when build fails or type errors occur. Fixes build/type errors only with minimal diffs, no architectural edits. Focuses on getting the build green quickly.
+description: |
+  Build and TypeScript error resolution specialist. Use PROACTIVELY when build fails or type errors occur. Fixes build/type errors only with minimal diffs, no architectural edits. Focuses on getting the build green quickly.
+
+  <example>
+  Context: TypeScript build just failed after a change.
+  user: "tsc is failing with 12 errors in src/api — fix the build"
+  assistant: "I'll dispatch build-error-resolver to clear the TypeScript errors with minimal diffs and get the build green."
+  </example>
+
+  <example>
+  Context: User pastes a compiler error without asking for architecture help.
+  user: "error TS2345: Argument of type 'string | undefined' is not assignable..."
+  assistant: "I'll use build-error-resolver to fix this type error with the smallest safe change."
+  </example>
+
+  <example>
+  Context: CI/build pipeline red after dependency bump.
+  user: "CI failed on next build after upgrading next — can you unblock it?"
+  assistant: "I'll dispatch build-error-resolver to fix build/type failures only, without redesigning the app."
+  </example>
 tools: Read, Write, Edit, Bash, Grep, Glob
 model: opus
 ---

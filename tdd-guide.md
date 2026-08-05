@@ -1,6 +1,25 @@
 ---
 name: tdd-guide
-description: Test-Driven Development specialist enforcing write-tests-first methodology. Use PROACTIVELY when writing new features, fixing bugs, or refactoring code. Ensures 80%+ test coverage.
+description: |
+  Test-Driven Development specialist enforcing write-tests-first methodology. Use PROACTIVELY when writing new features, fixing bugs, or refactoring code. Ensures 80%+ test coverage.
+
+  <example>
+  Context: User starts a new feature and should write tests first.
+  user: "Add a cart total calculator — do it TDD style"
+  assistant: "I'll dispatch tdd-guide to drive RED → GREEN → REFACTOR for the cart total calculator with tests first."
+  </example>
+
+  <example>
+  Context: Bug fix without tests yet.
+  user: "Fix the timezone bug in invoice dates, but write a failing test first"
+  assistant: "I'll use tdd-guide to add a failing test, then implement the minimal fix under TDD discipline."
+  </example>
+
+  <example>
+  Context: Coverage gap while implementing.
+  user: "Coverage is at 62% on the new payments module — help me get to 80%"
+  assistant: "I'll dispatch tdd-guide to expand tests test-first until the payments module meets 80%+ coverage."
+  </example>
 tools: Read, Write, Edit, Bash, Grep
 model: opus
 ---

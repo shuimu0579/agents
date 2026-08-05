@@ -1,6 +1,25 @@
 ---
 name: code-reviewer
-description: Expert code review specialist. Proactively reviews code for quality, security, and maintainability. Use immediately after writing or modifying code. MUST BE USED for all code changes.
+description: |
+  Expert code review specialist. Proactively reviews code for quality, security, and maintainability. Use immediately after writing or modifying code. MUST BE USED for all code changes.
+
+  <example>
+  Context: User just finished implementing a feature and wants a quality check before commit.
+  user: "I just rewrote the auth middleware — can you review the changes?"
+  assistant: "I'll dispatch the code-reviewer agent to review the auth middleware diff for quality, security, and maintainability."
+  </example>
+
+  <example>
+  Context: User made uncommitted edits and asks for a pre-PR check without naming a reviewer.
+  user: "Check if what I just wrote looks good before I open a PR"
+  assistant: "I'll use the code-reviewer agent on the uncommitted diff to catch quality and security issues before the PR."
+  </example>
+
+  <example>
+  Context: Should still trigger after ordinary code edits even if user only says "looks ok?"
+  user: "Does this payment service change look ok?"
+  assistant: "I'll dispatch code-reviewer to inspect the payment service changes against the review checklist."
+  </example>
 tools: Read, Grep, Glob, Bash
 model: opus
 ---

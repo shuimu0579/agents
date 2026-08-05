@@ -1,6 +1,25 @@
 ---
 name: e2e-runner
-description: End-to-end testing specialist using Playwright. Use PROACTIVELY for generating, maintaining, and running E2E tests. Manages test journeys, quarantines flaky tests, uploads artifacts (screenshots, videos, traces), and ensures critical user flows work.
+description: |
+  End-to-end testing specialist using Playwright. Use PROACTIVELY for generating, maintaining, and running E2E tests. Manages test journeys, quarantines flaky tests, uploads artifacts (screenshots, videos, traces), and ensures critical user flows work.
+
+  <example>
+  Context: User wants Playwright coverage for a critical checkout flow.
+  user: "Add E2E tests for the checkout happy path with Playwright"
+  assistant: "I'll dispatch e2e-runner to create and run a Playwright journey for the checkout flow with artifacts."
+  </example>
+
+  <example>
+  Context: Flaky E2E tests failing in CI.
+  user: "The login E2E is flaky in CI — quarantine or fix it"
+  assistant: "I'll use e2e-runner to diagnose flakiness, quarantine if needed, and capture traces/screenshots."
+  </example>
+
+  <example>
+  Context: User cares about end-to-end user flows without saying Playwright.
+  user: "Make sure the full signup → onboard path still works before release"
+  assistant: "I'll dispatch e2e-runner to cover and run that critical user journey end-to-end."
+  </example>
 tools: Read, Write, Edit, Bash, Grep, Glob
 model: opus
 ---

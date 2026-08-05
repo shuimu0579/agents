@@ -1,6 +1,25 @@
 ---
 name: architect
-description: Software architecture specialist for system design, scalability, and technical decision-making. Use PROACTIVELY when planning new features, refactoring large systems, or making architectural decisions.
+description: |
+  Software architecture specialist for system design, scalability, and technical decision-making. Use PROACTIVELY when planning new features, refactoring large systems, or making architectural decisions.
+
+  <example>
+  Context: User needs system design for a new multi-tenant feature.
+  user: "Design how we should support multi-tenant workspaces in this API"
+  assistant: "I'll dispatch the architect agent to propose system design, boundaries, and trade-offs for multi-tenant workspaces."
+  </example>
+
+  <example>
+  Context: User is choosing between two large-scale approaches.
+  user: "Should we use event sourcing or a simpler CRUD model for the order pipeline?"
+  assistant: "I'll use the architect agent to compare architectural options, trade-offs, and a recommendation for the order pipeline."
+  </example>
+
+  <example>
+  Context: Large refactor without explicit "architecture" keyword.
+  user: "We're splitting the monolith into services — where should billing live?"
+  assistant: "That's a structural decision — I'll dispatch architect to map service boundaries and recommend where billing belongs."
+  </example>
 tools: Read, Grep, Glob
 model: opus
 ---

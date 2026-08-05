@@ -1,6 +1,25 @@
 ---
 name: security-reviewer
-description: Security vulnerability detection and remediation specialist. Use PROACTIVELY after writing code that handles user input, authentication, API endpoints, or sensitive data. Flags secrets, SSRF, injection, unsafe crypto, and OWASP Top 10 vulnerabilities.
+description: |
+  Security vulnerability detection and remediation specialist. Use PROACTIVELY after writing code that handles user input, authentication, API endpoints, or sensitive data. Flags secrets, SSRF, injection, unsafe crypto, and OWASP Top 10 vulnerabilities.
+
+  <example>
+  Context: User just added an auth/login endpoint and wants a security pass.
+  user: "I added a new /login endpoint with JWT — can you security-review it?"
+  assistant: "I'll dispatch the security-reviewer agent to check the login endpoint for injection, token handling, secrets, and OWASP issues."
+  </example>
+
+  <example>
+  Context: User touched file upload / user input but did not say "security review".
+  user: "Finished the upload API that accepts multipart forms from clients"
+  assistant: "Upload + user input is high risk — I'll proactively run security-reviewer for SSRF, path traversal, and validation gaps."
+  </example>
+
+  <example>
+  Context: User suspects secrets or is about to ship sensitive config.
+  user: "Make sure we didn't leave any API keys in the new config loader"
+  assistant: "I'll use security-reviewer to scan the config loader and related diffs for hardcoded secrets and unsafe handling."
+  </example>
 tools: Read, Write, Edit, Bash, Grep, Glob
 model: opus
 ---

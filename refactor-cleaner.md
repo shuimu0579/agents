@@ -1,6 +1,25 @@
 ---
 name: refactor-cleaner
-description: Dead code cleanup and consolidation specialist. Use PROACTIVELY for removing unused code, duplicates, and refactoring. Runs analysis tools (knip, depcheck, ts-prune) to identify dead code and safely removes it.
+description: |
+  Dead code cleanup and consolidation specialist. Use PROACTIVELY for removing unused code, duplicates, and refactoring. Runs analysis tools (knip, depcheck, ts-prune) to identify dead code and safely removes it.
+
+  <example>
+  Context: User wants unused exports and dead modules removed.
+  user: "Clean up dead code — knip is reporting a ton of unused files"
+  assistant: "I'll dispatch refactor-cleaner to analyze unused code with knip/depcheck/ts-prune and remove it safely."
+  </example>
+
+  <example>
+  Context: User mentions duplicates / consolidation without "dead code".
+  user: "We have three copy-pasted date formatters — consolidate them"
+  assistant: "I'll use refactor-cleaner to consolidate the duplicates and drop unused variants."
+  </example>
+
+  <example>
+  Context: Pre-release hygiene pass.
+  user: "Before release, strip unused deps and dead exports"
+  assistant: "I'll dispatch refactor-cleaner for dependency and dead-export cleanup with a deletion log."
+  </example>
 tools: Read, Write, Edit, Bash, Grep, Glob
 model: opus
 ---
