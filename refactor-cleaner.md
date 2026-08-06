@@ -20,7 +20,7 @@ description: |
   user: "Before release, strip unused deps and dead exports"
   assistant: "I'll dispatch refactor-cleaner for dependency and dead-export cleanup with a deletion log."
   </example>
-tools: Read, Write, Edit, Bash, Grep, Glob
+tools: Read, Write, Edit, Bash, Grep
 model: opus
 ---
 
@@ -63,9 +63,10 @@ npx eslint . --report-unused-disable-directives
 
 ### 1. Analysis Phase
 ```
-a) Run detection tools in parallel
-b) Collect all findings
-c) Categorize by risk level:
+a) Run detection tools in parallel (knip / depcheck / ts-prune via Bash)
+b) Grep for imports and dynamic string references of each candidate
+c) Collect all findings
+d) Categorize by risk level:
    - SAFE: Unused exports, unused dependencies
    - CAREFUL: Potentially used via dynamic imports
    - RISKY: Public API, shared utilities
@@ -105,12 +106,15 @@ d) Delete duplicates
 e) Verify tests still pass
 ```
 
-## Deletion Log Format
+## Output Format (required)
 
-Create/update `docs/DELETION_LOG.md` with this structure:
+Also append the same content to `docs/DELETION_LOG.md` when deletions land:
 
 ```markdown
-# Code Deletion Log
+# Refactor Session Report
+
+**Date:** YYYY-MM-DD
+**Recommendation:** SAFE_TO_MERGE | NEEDS_TEST_RERUN | REVERT
 
 ## [YYYY-MM-DD] Refactor Session
 
@@ -208,28 +212,27 @@ components/Button.tsx (with variant prop)
 }
 ```
 
-## Example Project-Specific Rules
+## Keep / Drop Heuristics (stack-agnostic)
 
-**CRITICAL - NEVER REMOVE:**
-- Privy authentication code
-- Solana wallet integration
-- Supabase database clients
-- Redis/OpenAI semantic search
-- Market trading logic
-- Real-time subscription handlers
+**NEVER remove without explicit user approval:**
+- Auth / session / wallet entrypoints
+- Database clients and migration entrypoints
+- Payment, ledger, or funds-movement paths
+- Security middleware (CORS, rate limit, CSRF, authz)
+- Public API surface still referenced by clients or docs
 
-**SAFE TO REMOVE:**
-- Old unused components in components/ folder
-- Deprecated utility functions
-- Test files for deleted features
-- Commented-out code blocks
-- Unused TypeScript types/interfaces
+**Usually safe to remove (after knip/ts-prune + tests):**
+- Unreferenced components and utils
+- Deprecated helpers with no importers
+- Tests for deleted features
+- Commented-out dead blocks
+- Unused types/interfaces with zero references
 
-**ALWAYS VERIFY:**
-- Semantic search functionality (lib/redis.js, lib/openai.js)
-- Market data fetching (api/markets/*, api/market/[slug]/)
-- Authentication flows (HeaderWallet.tsx, UserMenu.tsx)
-- Trading functionality (Meteora SDK integration)
+**Always re-verify after deletion:**
+- Auth login/logout/session refresh
+- Primary data-fetch paths for core entities
+- Any money or irreversible mutations
+- CI typecheck + unit/integration suite green
 
 ## Pull Request Template
 

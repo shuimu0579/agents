@@ -20,7 +20,7 @@ description: |
   user: "CI failed on next build after upgrading next — can you unblock it?"
   assistant: "I'll dispatch build-error-resolver to fix build/type failures only, without redesigning the app."
   </example>
-tools: Read, Write, Edit, Bash, Grep, Glob
+tools: Read, Write, Edit, Bash
 model: opus
 ---
 
@@ -280,77 +280,55 @@ export const MyComponent = () => <div />
 export const someConstant = 42
 ```
 
-## Example Project-Specific Build Issues
+## Common Build Issue Patterns (stack-agnostic)
 
-### Next.js 15 + React 19 Compatibility
+### React / component prop types
 ```typescript
-// ❌ ERROR: React 19 type changes
+// ❌ ERROR: outdated FC patterns or implicit any props
 import { FC } from 'react'
+const Component: FC = ({ children }) => <div>{children}</div>
 
+// ✅ FIX: explicit props; prefer function components with typed props
 interface Props {
   children: React.ReactNode
 }
-
-const Component: FC<Props> = ({ children }) => {
-  return <div>{children}</div>
-}
-
-// ✅ FIX: React 19 doesn't need FC
-interface Props {
-  children: React.ReactNode
-}
-
-const Component = ({ children }: Props) => {
-  return <div>{children}</div>
-}
+const Component = ({ children }: Props) => <div>{children}</div>
 ```
 
-### Supabase Client Types
+### Untyped client / query results
 ```typescript
-// ❌ ERROR: Type 'any' not assignable
-const { data } = await supabase
-  .from('markets')
-  .select('*')
+// ❌ ERROR: result typed as any / unknown not narrowed
+const { data } = await client.from('items').select('*')
 
-// ✅ FIX: Add type annotation
-interface Market {
+// ✅ FIX: annotate row type or use generated DB types
+interface Item {
   id: string
   name: string
-  slug: string
-  // ... other fields
 }
-
-const { data } = await supabase
-  .from('markets')
-  .select('*') as { data: Market[] | null, error: any }
+const { data } = await client.from('items').select('*') as {
+  data: Item[] | null
+  error: Error | null
+}
 ```
 
-### Redis Stack Types
+### Missing module members after SDK upgrade
 ```typescript
-// ❌ ERROR: Property 'ft' does not exist on type 'RedisClientType'
-const results = await client.ft.search('idx:markets', query)
+// ❌ ERROR: Property 'x' does not exist on type 'Client'
+const results = await client.advancedSearch(query)
 
-// ✅ FIX: Use proper Redis Stack types
-import { createClient } from 'redis'
-
-const client = createClient({
-  url: process.env.REDIS_URL
-})
-
-await client.connect()
-
-// Type is inferred correctly now
-const results = await client.ft.search('idx:markets', query)
+// ✅ FIX: import the client factory that includes the feature surface
+import { createClient } from 'the-sdk'
+const client = createClient({ url: process.env.SERVICE_URL })
+const results = await client.advancedSearch(query)
 ```
 
-### Solana Web3.js Types
+### Brand / value-object constructors
 ```typescript
-// ❌ ERROR: Argument of type 'string' not assignable to 'PublicKey'
-const publicKey = wallet.address
+// ❌ ERROR: Argument of type 'string' not assignable to branded type
+const id = user.rawId
 
-// ✅ FIX: Use PublicKey constructor
-import { PublicKey } from '@solana/web3.js'
-const publicKey = new PublicKey(wallet.address)
+// ✅ FIX: construct the required type explicitly
+const id = UserId.parse(user.rawId) // or new PublicKey(...), etc.
 ```
 
 ## Minimal Diff Strategy
@@ -404,33 +382,34 @@ function processData(data: Array<{ value: number }>) {
 }
 ```
 
-## Build Error Report Format
+## Output Format (required)
 
 ```markdown
 # Build Error Resolution Report
 
 **Date:** YYYY-MM-DD
-**Build Target:** Next.js Production / TypeScript Check / ESLint
+**Build Target:** [tsc | next build | eslint | other from repo]
 **Initial Errors:** X
 **Errors Fixed:** Y
 **Build Status:** ✅ PASSING / ❌ FAILING
+**Recommendation:** GREEN | STILL_RED
 
 ## Errors Fixed
 
 ### 1. [Error Category - e.g., Type Inference]
-**Location:** `src/components/MarketCard.tsx:45`
+**Location:** `src/components/ItemCard.tsx:45`
 **Error Message:**
 ```
-Parameter 'market' implicitly has an 'any' type.
+Parameter 'item' implicitly has an 'any' type.
 ```
 
 **Root Cause:** Missing type annotation for function parameter
 
 **Fix Applied:**
 ```diff
-- function formatMarket(market) {
-+ function formatMarket(market: Market) {
-    return market.name
+- function formatItem(item) {
++ function formatItem(item: Item) {
+    return item.name
   }
 ```
 
