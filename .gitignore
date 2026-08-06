@@ -1,2 +1,5 @@
 .DS_Store
 .claude/
+
+# nlpm generated artifacts
+.claude/nlpm-history.json
