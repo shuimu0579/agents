@@ -3,3 +3,6 @@
 
 # nlpm generated artifacts
 .claude/nlpm-history.json
+
+# local ui-tokenize session noise
+.tokenize/

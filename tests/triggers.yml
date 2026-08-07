@@ -1,0 +1,91 @@
+# tests/triggers.yml — single source of truth for agent trigger fixtures (grill F33)
+# Used by humans and by tests/guardrails.sh (optional sanity). Not loaded by Claude Code runtime.
+#
+# Fields:
+#   agent: filename stem under ~/.claude/agents/
+#   positive: sample user utterances that SHOULD dispatch this agent
+#   negative: sample utterances that should NOT (or should go elsewhere)
+#   arbitrates_to: when ambiguous, which agent wins per rules/agents.md
+
+agents:
+  - agent: architect
+    positive:
+      - "Design how we should support multi-tenant workspaces"
+      - "Should we use event sourcing or CRUD for the order pipeline?"
+    negative:
+      - "Break this into implementation steps" # planner
+    arbitrates_to: "structural design/decide → architect"
+
+  - agent: planner
+    positive:
+      - "Plan rate limiting across middleware, config, and tests"
+      - "Outline work items for the notifications redesign"
+    negative:
+      - "Should we use Kafka or SQS?" # architect
+    arbitrates_to: "mechanical plan/outline → planner"
+
+  - agent: tdd-guide
+    positive:
+      - "Add a cart total calculator — TDD style"
+      - "Fix the timezone bug; write a failing test first"
+    negative:
+      - "tsc is failing with 12 errors" # build-error-resolver
+    arbitrates_to: "new behavior / bug fix with tests"
+
+  - agent: code-reviewer
+    positive:
+      - "I just rewrote the auth middleware — review the changes"
+      - "Does this payment service change look ok?"
+    negative:
+      - "Still writing the RED test for login" # wait until implementation settles
+    arbitrates_to: "after implementation settles, before commit"
+
+  - agent: security-reviewer
+    positive:
+      - "I added a new /login endpoint with JWT"
+      - "Scan the upload API for SSRF and path traversal"
+    negative:
+      - "Rename a pure CSS variable" # no security surface
+    arbitrates_to: "auth/secrets/input/API; parallel with code-reviewer"
+
+  - agent: build-error-resolver
+    positive:
+      - "tsc is failing with 12 errors in src/api"
+      - "CI failed on next build after upgrading next"
+    negative:
+      - "Design a new billing service" # architect
+    arbitrates_to: "build red → exclusive until green"
+
+  - agent: e2e-runner
+    positive:
+      - "Add E2E tests for checkout happy path with Playwright"
+      - "The login E2E is flaky in CI"
+    negative:
+      - "Unit test the pure total calculator" # tdd-guide
+    arbitrates_to: "critical user journeys"
+
+  - agent: refactor-cleaner
+    positive:
+      - "knip reports a ton of unused files — clean up"
+      - "We have three copy-pasted date formatters — consolidate"
+    negative:
+      - "Refactor auth to change behavior" # tdd-guide + planner
+    arbitrates_to: "dead code / duplication only"
+
+  - agent: doc-updater
+    positive:
+      - "Update codemaps and README after the services split"
+      - "Sync docs with code before release"
+    negative:
+      - "Implement the new feature" # tdd-guide
+    arbitrates_to: "docs/codemap drift; parallel post-merge ok"
+
+  - agent: _xixi
+    positive:
+      - "帮我优化一下这个 system prompt：你是助手"
+      - "Review this prompt and make it more reliable"
+      - "@_xixi 润色下面的提示词"
+    negative:
+      - "用 gemini 给这个耳环出六张主图 prompt" # gemini-image skills
+      - "帮我把 auth.ts 的 bug 修了" # coding agents
+    arbitrates_to: "concrete LLM prompt body only"
