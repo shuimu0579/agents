@@ -19,16 +19,40 @@ set -uo pipefail
 HOOKS_DIR="$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 APPROVAL_DIR="${HOOKS_DIR}/approvals"
 APPROVAL_MAX_AGE_SEC=300
+AGENT_CONTRACT_FILE="${AGENT_CONTRACT_FILE:-${HOOKS_DIR}/../tests/fixtures/agent-contract.tsv}"
+HOOK_AUDIT_LOG="${HOOK_AUDIT_LOG:-${TMPDIR:-/tmp}/claude-agent-bash-gate.audit.log}"
+
+cmd=""
+agent=""
+
+observe_attribution() {
+  local observed_agent="${agent:-<absent>}"
+  observed_agent="${observed_agent//$'\n'/ }"
+  observed_agent="${observed_agent//$'\r'/ }"
+  printf '[bash-hook] attribution agent_type=%s\n' "$observed_agent" >&2
+}
+
+audit_decision() {
+  local rule="$1" decision="$2" logged_agent epoch
+  logged_agent="${agent:-<absent>}"
+  logged_agent="${logged_agent//$'\n'/ }"
+  logged_agent="${logged_agent//$'\r'/ }"
+  (
+    epoch=$(date +%s 2>/dev/null || printf '0')
+    printf '%s agent_type=%s rule=%s decision=%s\n' \
+      "$epoch" "$logged_agent" "$rule" "$decision" >> "$HOOK_AUDIT_LOG"
+  ) 2>/dev/null || true
+}
 
 input=$(cat)
 
 # A direct invocation with no hook payload is a main-session/no-op probe.
 if [[ -z "$input" ]]; then
+  observe_attribution
+  audit_decision "direct-noop" "allow"
   exit 0
 fi
 
-cmd=""
-agent=""
 parse_ok=0
 if command -v jq >/dev/null 2>&1; then
   if printf '%s' "$input" | jq -e . >/dev/null 2>&1; then
@@ -39,8 +63,9 @@ if command -v jq >/dev/null 2>&1; then
     parse_ok=0
   fi
 else
-  # No jq: fail closed if a restricted agent_type appears in the raw payload.
-  if printf '%s' "$input" | grep -qE '"agent_type"[[:space:]]*:[[:space:]]*"(e2e-runner|code-reviewer|security-reviewer|architect)"'; then
+  # No jq: fail closed if any named agent_type appears in the raw payload.
+  if printf '%s' "$input" | grep -qE '"agent_type"[[:space:]]*:[[:space:]]*"[^"[:space:]]+"'; then
+    agent=$(printf '%s' "$input" | sed -n 's/.*"agent_type"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
     parse_ok=0
   else
     cmd=$(printf '%s' "$input" | sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
@@ -49,34 +74,21 @@ else
   fi
 fi
 
-# F3-3: opt-in attribution audit. This is deliberately best-effort: logging must
-# never alter the policy decision, including when HOME/date/jq or the log path fails.
-debug_attribution() {
-  [[ "${HOOK_DEBUG:-}" == "1" ]] || return 0
-  (
-    local epoch tool logged_agent logged_tool logged_cmd log_path
-    [[ -n "${HOME:-}" ]] || exit 0
-    epoch=$(date +%s 2>/dev/null || printf '0')
-    tool=""
-    if command -v jq >/dev/null 2>&1; then
-      tool=$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null || true)
-    fi
-    logged_agent="${agent//$'\n'/ }"
-    logged_agent="${logged_agent//$'\r'/ }"
-    logged_tool="${tool//$'\n'/ }"
-    logged_tool="${logged_tool//$'\r'/ }"
-    logged_cmd="${cmd//$'\n'/ }"
-    logged_cmd="${logged_cmd//$'\r'/ }"
-    logged_cmd="${logged_cmd:0:80}"
-    log_path="${HOME}/.claude/agents/hooks/agent-type.log"
-    printf '%s agent_type=%s tool_name=%s command=%s\n' \
-      "$epoch" "$logged_agent" "$logged_tool" "$logged_cmd" >> "$log_path"
-  ) 2>/dev/null || true
-}
-debug_attribution
+observe_attribution
 
 block() {
   local reason="$1"
+  local rule="${2:-deny}"
+  local parsed_rule=""
+  if [[ "$rule" == "deny" ]]; then
+    parsed_rule="$(printf '%s' "$reason" | sed -n 's/.*(rule:\([^)]*\)).*/\1/p')"
+    if [[ -n "$parsed_rule" ]]; then
+      rule="$parsed_rule"
+    elif [[ "$reason" == *"approval file"* ]]; then
+      rule="approval-required"
+    fi
+  fi
+  audit_decision "$rule" "deny"
   # Do not echo untrusted command bodies (may contain secrets) — rule id only.
   echo "$reason" >&2
   if command -v jq >/dev/null 2>&1; then
@@ -89,21 +101,31 @@ block() {
 # Parse failure while payload names a restricted agent → fail closed.
 if [[ "$parse_ok" -eq 0 ]]; then
   if ! command -v jq >/dev/null 2>&1; then
-    block "[bash-hook] BLOCKED: jq unavailable — cannot attribute agent_type for Bash gate. Install jq."
+    block "[bash-hook] BLOCKED: jq unavailable — cannot attribute agent_type for Bash gate. Install jq." "parse-no-jq"
   fi
-  block "[bash-hook] BLOCKED: cannot parse Bash tool payload (rule:parse)."
+  block "[bash-hook] BLOCKED: cannot parse Bash tool payload (rule:parse)." "parse"
 fi
 
-case "$agent" in
-  code-reviewer|security-reviewer|architect)
-    block "[bash-hook] BLOCKED: agent_type=$agent must not use Bash (rule:review-only)."
-    ;;
-esac
+if [[ -z "$agent" ]]; then
+  audit_decision "main-session" "allow"
+  exit 0
+fi
 
-case "$agent" in
-  e2e-runner) ;;
-  "") exit 0 ;; # main session / unknown non-restricted
-  *) exit 0 ;;
+if [[ ! -r "$AGENT_CONTRACT_FILE" ]]; then
+  block "[bash-hook] BLOCKED: agent contract unavailable (rule:contract)." "contract-missing"
+fi
+agent_policy="$(awk -F'|' -v target="$agent" '$1 == target { print $5; exit }' "$AGENT_CONTRACT_FILE" 2>/dev/null || true)"
+case "$agent_policy" in
+  review_only)
+    block "[bash-hook] BLOCKED: agent_type=$agent must not use Bash (rule:review-only)." "review-only"
+    ;;
+  mutator) ;;
+  "")
+    block "[bash-hook] BLOCKED: named agent is absent from the fleet contract (rule:unknown-agent)." "unknown-agent"
+    ;;
+  *)
+    block "[bash-hook] BLOCKED: invalid agent policy in fleet contract (rule:contract)." "contract-invalid"
+    ;;
 esac
 
 # --- Mutators only below ---
@@ -147,20 +169,31 @@ fi
 # settings.json PreToolUse Write|Edit blocks writes under hooks/approvals/).
 consume_approval() {
   # $1 = token name e.g. with-deps | snapshots
-  local name="$1" f age now
+  local name="$1" f claim age now mtime mode
   f="${APPROVAL_DIR}/${name}"
   if [[ ! -f "$f" ]]; then
     return 1
   fi
-  now=$(date +%s)
-  local mtime
-  mtime=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)
-  age=$((now - mtime))
-  if [[ "$age" -gt "$APPROVAL_MAX_AGE_SEC" ]]; then
-    rm -f -- "$f" 2>/dev/null || true
+  claim="${f}.consuming.$$"
+  if ! mv -- "$f" "$claim" 2>/dev/null; then
     return 1
   fi
-  rm -f -- "$f" 2>/dev/null || true
+  mode=$(stat -f %Lp "$claim" 2>/dev/null || stat -c %a "$claim" 2>/dev/null || printf 'unknown')
+  if [[ "$mode" != "600" ]]; then
+    rm -f -- "$claim" 2>/dev/null || true
+    return 1
+  fi
+  if ! now=$(date +%s 2>/dev/null); then
+    rm -f -- "$claim" 2>/dev/null || true
+    return 1
+  fi
+  mtime=$(stat -f %m "$claim" 2>/dev/null || stat -c %Y "$claim" 2>/dev/null || printf '0')
+  age=$((now - mtime))
+  if [[ "$mtime" -eq 0 || "$age" -lt 0 || "$age" -ge "$APPROVAL_MAX_AGE_SEC" ]]; then
+    rm -f -- "$claim" 2>/dev/null || true
+    return 1
+  fi
+  rm -f -- "$claim" 2>/dev/null || true
   return 0
 }
 
@@ -184,15 +217,38 @@ url_host() {
   else
     host="$authority"
   fi
-  printf '%s' "$host"
+  host="${host%.}"
+  printf '%s' "$host" | tr '[:upper:]' '[:lower:]'
 }
 
 host_safe() {
-  case "$1" in
+  local host="$1" candidate
+  case "$host" in
     localhost|127.0.0.1|::1) return 0 ;;
-    *.test|*.local|*.staging) return 0 ;;
-    *) return 1 ;;
+    *.test|*.local) return 0 ;;
   esac
+  [[ -n "${E2E_ALLOWED_HOSTS:-}" ]] || return 1
+  local -a allowed_hosts
+  IFS=',' read -ra allowed_hosts <<< "${E2E_ALLOWED_HOSTS:-}"
+  for candidate in "${allowed_hosts[@]}"; do
+    candidate="$(printf '%s' "$candidate" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')"
+    [[ -n "$candidate" && "$candidate" == "$host" ]] && return 0
+  done
+  return 1
+}
+
+validate_config_file() {
+  local cfg="$1" config_url config_host
+  if [[ ! -f "$cfg" ]]; then
+    block "[bash-hook] BLOCKED: Playwright config file not found (rule:prod-guard-config)." "prod-guard-config-missing"
+  fi
+  while IFS= read -r config_url; do
+    [[ -n "$config_url" ]] || continue
+    config_host="$(url_host "$config_url")"
+    if [[ -z "$config_host" ]] || ! host_safe "$config_host"; then
+      block "[bash-hook] BLOCKED: playwright.config baseURL not local/staging (rule:prod-guard-config)." "prod-guard-config"
+    fi
+  done < <(grep -iE 'baseURL[[:space:]]*:' "$cfg" 2>/dev/null | grep -ioE 'https?://[^[:space:]"'"'"']+' || true)
 }
 
 allowed=0
@@ -230,31 +286,46 @@ case "$agent" in
       if ! host_safe "$_ih"; then
         block "[bash-hook] BLOCKED: inline URL host not on approved staging allowlist (rule:prod-guard)."
       fi
-    done < <(printf '%s' "$norm" | grep -oE 'https?://[^[:space:]"'"'"']+' || true)
+    done < <(printf '%s' "$norm" | grep -ioE 'https?://[^[:space:]"'"'"']+' || true)
 
-    # Best-effort config-embed mitigation: `playwright test` with no explicit --base-url / BASE_URL
-    # → validate any baseURL literal found in playwright.config.* in the tool's cwd.
-    if printf '%s' "$norm" | grep -qE '(^|[[:space:]])playwright[[:space:]]+test' \
-       && ! printf '%s' "$norm" | grep -qE -- '--base-url|--config' \
-       && [[ -z "${BASE_URL:-}" ]]; then
-      for cfg in playwright.config.*; do
-        [[ -f "$cfg" ]] || continue
-        _bad="$(grep -oE 'https?://[^"'"'"' ]+' "$cfg" 2>/dev/null | grep -vE 'localhost|127\.0\.0\.1|\[::1\]|\.test|\.local|\.staging' | head -1 || true)"
-        if [[ -n "$_bad" ]]; then
-          block "[bash-hook] BLOCKED: playwright.config baseURL not local/staging (rule:prod-guard-config)."
-        fi
-      done
+    # Validate the effective config path even when --config is present. Literal
+    # baseURLs use the same parsed-host policy as BASE_URL and --base-url.
+    if printf '%s' "$norm" | grep -qE '^(node_modules/\.bin/playwright|playwright|npx[[:space:]]+--no-install[[:space:]]+playwright)[[:space:]]+test([[:space:]]|$)'; then
+      _config_path=""
+      if [[ "$norm" =~ (^|[[:space:]])--config=([^[:space:]]+) ]]; then
+        _config_path="${BASH_REMATCH[2]}"
+      elif [[ "$norm" =~ (^|[[:space:]])--config[[:space:]]+([^[:space:]]+) ]]; then
+        _config_path="${BASH_REMATCH[2]}"
+      elif printf '%s' "$norm" | grep -qE -- '(^|[[:space:]])--config([[:space:]]|$)'; then
+        block "[bash-hook] BLOCKED: --config requires a path (rule:prod-guard-config)." "prod-guard-config-arg"
+      fi
+      _config_path="${_config_path#\"}"; _config_path="${_config_path%\"}"
+      _config_path="${_config_path#\'}"; _config_path="${_config_path%\'}"
+      if [[ -n "$_config_path" ]]; then
+        validate_config_file "$_config_path"
+      elif [[ -z "${BASE_URL:-}" ]] && ! printf '%s' "$norm" | grep -qE -- '--base-url'; then
+        for cfg in playwright.config.*; do
+          [[ -f "$cfg" ]] || continue
+          validate_config_file "$cfg"
+        done
+      fi
     fi
 
-    # One-shot approvals — scoped to the privileged command forms only (no broad -u borrow).
-    if printf '%s' "$norm" | grep -qE '(^|[[:space:]])playwright[[:space:]]+install[[:space:]]+--with-deps'; then
+    # Validate an anchored launcher and complete privileged command before consuming
+    # a one-shot approval. Substring mentions never consume or borrow a token.
+    if printf '%s' "$norm" | grep -qE 'playwright[[:space:]]+install[[:space:]]+--with-deps'; then
+      if ! printf '%s' "$norm" | grep -qE '^(node_modules/\.bin/playwright|playwright|npx[[:space:]]+--no-install[[:space:]]+playwright)[[:space:]]+install[[:space:]]+--with-deps$'; then
+        block "[bash-hook] BLOCKED: invalid privileged Playwright install command (rule:approval-command)." "approval-command"
+      fi
       if consume_approval "with-deps"; then
         allowed=1
       else
         block "[bash-hook] BLOCKED: playwright install --with-deps needs orchestrator approval file hooks/approvals/with-deps (max ${APPROVAL_MAX_AGE_SEC}s, one-shot)."
       fi
-    elif printf '%s' "$norm" | grep -qE '(^|[[:space:]])playwright[[:space:]]+test' \
-       && printf '%s' "$norm" | grep -qE -- '(--update-snapshots|[[:space:]]-u([[:space:]]|$))'; then
+    elif printf '%s' "$norm" | grep -qE -- '(--update-snapshots|(^|[[:space:]])-u([[:space:]]|$))'; then
+      if ! printf '%s' "$norm" | grep -qE '^(node_modules/\.bin/playwright|playwright|npx[[:space:]]+--no-install[[:space:]]+playwright)[[:space:]]+test([[:space:]]|$)'; then
+        block "[bash-hook] BLOCKED: invalid snapshot command launcher (rule:approval-command)." "approval-command"
+      fi
       if consume_approval "snapshots"; then
         allowed=1
       else
@@ -273,7 +344,8 @@ case "$agent" in
 esac
 
 if [[ "$allowed" -eq 1 ]]; then
+  audit_decision "allowlist" "allow"
   exit 0
 fi
 
-block "[bash-hook] BLOCKED: command not on allowlist for $agent (rule:allowlist)."
+block "[bash-hook] BLOCKED: command not on allowlist for $agent (rule:allowlist)." "allowlist"

@@ -2,7 +2,7 @@
 
 Conditional / deep-reference material for `security-reviewer`. Load these sections only when the reviewed scope matches. The agent prompt stays core static application-security logic; this file holds the domain detail (2026-08-09 audit S2-2 split).
 
-## Grep patterns (always use `-l` / line-number-only output — never echo matching lines)
+## Grep patterns (use `files_only` to locate candidates, then Read a bounded range)
 
 ```text
 # Secrets / keys
@@ -15,20 +15,20 @@ innerHTML\s*=|document\.write\(|eval\(|new Function\(|child_process|\.exec\(|\.q
 app\.(get|post|put|delete)\([^)]+\)\s*(async\s*)?\(  without nearby auth middleware names
 ```
 
-Report a hit as `path:line` (filename + line number only). Inspect a full value only when necessary, and never echo it — first4/last4 only.
+Use Grep `files_only` so matching lines are not echoed. Read only the bounded range needed to establish a finding, then report `path:line`; secret values stay first4/last4 only. Route bulk secret scans to owner-run `gitleaks` or `trufflehog`.
 
-## OWASP Top 10 checklist
+## OWASP Top 10:2025 checklist
 
-1. **Injection (SQL/NoSQL/Command)** — parameterized queries / ORM binds; no string-concat SQL
-2. **Broken Authentication** — bcrypt/argon2; JWT sig + exp + aud on every request; HttpOnly/Secure/SameSite cookies; MFA if available
-3. **Sensitive Data Exposure** — HTTPS enforced; secrets in env; PII encrypted at rest; logs sanitized
-4. **XXE** — XML parsers configured securely; external entities disabled
-5. **Broken Access Control** — authz on every route; indirect object references; CORS explicit allowlist (no `*`)
-6. **Security Misconfiguration** — default creds changed; secure error handling; security headers; no debug in prod
-7. **XSS** — output escaped/sanitized; CSP set; framework defaults respected
-8. **Insecure Deserialization** — safe deserialization; libraries up to date
-9. **Known Vulnerable Components** — lockfiles reviewed; owner-run audit CLI; CVE monitoring
-10. **Insufficient Logging & Monitoring** — security events logged; monitored; alerts configured
+1. **A01 Broken Access Control** — authz on every route/object; CORS allowlist; SSRF explicitly checked on server-side URL fetches with scheme/host/IP validation and redirect/DNS-rebinding controls
+2. **A02 Security Misconfiguration** — default credentials removed; errors fail closed; security headers set; debug disabled in production
+3. **A03 Software Supply Chain Failures** — lockfiles reviewed; provenance and build pipeline protected; owner-run vulnerability/license audit supplied
+4. **A04 Cryptographic Failures** — modern password hashing; key lifecycle defined; TLS and sensitive-data encryption established or marked UNKNOWN
+5. **A05 Injection** — parameterized SQL/NoSQL; command arguments avoid shell interpolation; output encoding covers XSS
+6. **A06 Insecure Design** — threat model covers trust boundaries, abuse cases, rate limits, money, and irreversible actions
+7. **A07 Authentication Failures** — JWT signature/expiry/audience checked; secure cookies; session rotation/revocation; MFA evidence marked UNKNOWN when unavailable
+8. **A08 Software or Data Integrity Failures** — signed/verified artifacts and updates; safe deserialization; untrusted code/data cannot cross integrity boundaries
+9. **A09 Security Logging & Alerting Failures** — security events logged without secrets; alerts route to an owner and have a tested response path
+10. **A10 Mishandling of Exceptional Conditions** — error paths fail closed; resource limits and cleanup hold under malformed, partial, timeout, and dependency-failure conditions
 
 ## Domain checklists (apply only when the stack is present — detect from repo markers, never assume)
 

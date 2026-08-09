@@ -10,6 +10,8 @@ set -uo pipefail
 
 HOOK_SRC="${HOOK_SRC:-$HOME/.claude/agents/hooks/restrict-bash-by-agent.sh}"
 SETTINGS="${SETTINGS:-$HOME/.claude/settings.json}"
+SCRIPT_DIR="$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+AGENT_CONTRACT_FILE="${AGENT_CONTRACT_FILE:-$SCRIPT_DIR/fixtures/agent-contract.tsv}"
 
 if [ ! -f "$HOOK_SRC" ]; then
   echo "FATAL: restrict-bash-by-agent.sh not found at $HOOK_SRC" >&2
@@ -23,10 +25,13 @@ fi
 TMPD="$(mktemp -d)"
 trap 'rm -rf "$TMPD"' EXIT
 mkdir -p "$TMPD/approvals"
+TEST_CWD="$TMPD/cwd"
+mkdir -p "$TEST_CWD"
 BASH_HOOK="$TMPD/restrict-bash-by-agent.sh"
 cp "$HOOK_SRC" "$BASH_HOOK"
 chmod +x "$BASH_HOOK"
 HOOK_ROOT="$TMPD"
+HOOK_AUDIT_LOG="$TMPD/bash-gate.audit.log"
 
 PASS=0
 FAIL=0
@@ -38,7 +43,20 @@ bt() {
   local desc="$1" agent="$2" cmd="$3" exp="$4" rc payload out
   shift 4
   payload=$(jq -nc --arg a "$agent" --arg c "$cmd" '{agent_type:$a, tool_input:{command:$c}}')
-  out="$(printf '%s' "$payload" | env "$@" bash "$BASH_HOOK" 2>&1)"
+  out="$(cd "$TEST_CWD" && printf '%s' "$payload" | env AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" "$@" bash "$BASH_HOOK" 2>&1)"
+  rc=$?
+  if [ "$rc" -eq "$exp" ]; then
+    PASS=$((PASS + 1)); echo "PASS  $desc"
+  else
+    FAIL=$((FAIL + 1)); echo "FAIL  $desc (exit=$rc, want=$exp) :: $(printf '%s' "$out" | head -1)"
+  fi
+}
+
+# bt_payload <desc> <full-json-payload> <expect-exit> [VAR=VAL ...]
+bt_payload() {
+  local desc="$1" payload="$2" exp="$3" rc out
+  shift 3
+  out="$(cd "$TEST_CWD" && printf '%s' "$payload" | env AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" "$@" bash "$BASH_HOOK" 2>&1)"
   rc=$?
   if [ "$rc" -eq "$exp" ]; then
     PASS=$((PASS + 1)); echo "PASS  $desc"
@@ -50,7 +68,20 @@ bt() {
 # --- main session / unknown → pass through (no agent_type) ---
 bt "main session free" "" "rm -rf /tmp/x" 0
 bt "main session multi-line allowed" "" $'echo a\necho b' 0
-bt "unknown future agent passthrough" "some-future-agent" "git status" 0
+bt "unknown named agent fail-closed" "some-future-agent" "git status" 2
+
+# --- real-shaped PreToolUse payload + observable attribution (F1) ---
+real_payload='{"session_id":"real-shaped-session","transcript_path":"/tmp/transcript.jsonl","cwd":"/tmp/repo","permission_mode":"bypassPermissions","hook_event_name":"PreToolUse","tool_name":"Bash","agent_type":"e2e-runner","tool_input":{"command":"node_modules/.bin/playwright test"},"tool_use_id":"toolu_test"}'
+main_payload='{"session_id":"main-session","transcript_path":"/tmp/transcript.jsonl","cwd":"/tmp/repo","permission_mode":"bypassPermissions","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/main-session-probe"},"tool_use_id":"toolu_main"}'
+bt_payload "real-shaped PreToolUse payload attributes e2e-runner" "$real_payload" 0
+bt_payload "real-shaped main payload without agent_type passes through" "$main_payload" 0
+attribution_out="$(cd "$TEST_CWD" && printf '%s' "$main_payload" | env AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" bash "$BASH_HOOK" 2>&1)"
+attribution_rc=$?
+if [ "$attribution_rc" -eq 0 ] && printf '%s' "$attribution_out" | grep -qF '[bash-hook] attribution agent_type=<absent>'; then
+  PASS=$((PASS + 1)); echo "PASS  missing agent_type is observable on stderr"
+else
+  FAIL=$((FAIL + 1)); echo "FAIL  missing agent_type attribution not observable (exit=$attribution_rc)"
+fi
 
 # --- review-only → always block ---
 bt "code-reviewer bash block" "code-reviewer" "git status" 2
@@ -89,18 +120,44 @@ bt "e2e node -e block" "e2e-runner" "node -e console.log(1)" 2
 bt "e2e empty command block" "e2e-runner" "" 2
 
 # --- one-shot approvals (scoped; no -u borrow; expiry) ---
-bt "e2e with-deps block (no approval)" "e2e-runner" "npx playwright install --with-deps" 2
+bt "e2e with-deps block (no approval)" "e2e-runner" "npx --no-install playwright install --with-deps" 2
 : > "$TMPD/approvals/with-deps"
-bt "e2e with-deps allow (approval file)" "e2e-runner" "npx playwright install --with-deps" 0
-bt "e2e with-deps consumed (one-shot)" "e2e-runner" "npx playwright install --with-deps" 2
+chmod 600 "$TMPD/approvals/with-deps"
+bt "e2e invalid install launcher cannot consume approval" "e2e-runner" "python3 /tmp/x.py playwright install --with-deps" 2
+bt "e2e with-deps allow (approval file)" "e2e-runner" "npx --no-install playwright install --with-deps" 0
+bt "e2e with-deps consumed (one-shot)" "e2e-runner" "npx --no-install playwright install --with-deps" 2
 bt "e2e update-snapshots block (no approval)" "e2e-runner" "playwright test --update-snapshots" 2
 : > "$TMPD/approvals/snapshots"
+chmod 600 "$TMPD/approvals/snapshots"
+bt "e2e invalid snapshot launcher cannot consume approval" "e2e-runner" "python3 /tmp/x.py playwright test --update-snapshots" 2
 bt "e2e update-snapshots allow (approval file)" "e2e-runner" "playwright test --update-snapshots" 0
 : > "$TMPD/approvals/snapshots"
+chmod 600 "$TMPD/approvals/snapshots"
 touch -t 202001010000 "$TMPD/approvals/snapshots"
 bt "e2e update-snapshots stale approval block" "e2e-runner" "playwright test --update-snapshots" 2
 : > "$TMPD/approvals/snapshots"
+chmod 600 "$TMPD/approvals/snapshots"
 bt "e2e -u cannot borrow approval (block)" "e2e-runner" "python3 -u /tmp/x.py" 2
+
+: > "$TMPD/approvals/snapshots"
+chmod 644 "$TMPD/approvals/snapshots"
+bt "e2e approval mode must be 600" "e2e-runner" "playwright test --update-snapshots" 2
+
+# Two concurrent consumers race for one token; exactly one can atomically claim it.
+: > "$TMPD/approvals/snapshots"
+chmod 600 "$TMPD/approvals/snapshots"
+race_payload=$(jq -nc '{agent_type:"e2e-runner",tool_input:{command:"playwright test --update-snapshots"}}')
+(cd "$TEST_CWD" && printf '%s' "$race_payload" | env AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" bash "$BASH_HOOK" >/dev/null 2>&1; echo $? > "$TMPD/race1") &
+race_pid1=$!
+(cd "$TEST_CWD" && printf '%s' "$race_payload" | env AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" bash "$BASH_HOOK" >/dev/null 2>&1; echo $? > "$TMPD/race2") &
+race_pid2=$!
+wait "$race_pid1" "$race_pid2"
+race_codes="$(sort "$TMPD/race1" "$TMPD/race2" | paste -sd, -)"
+if [ "$race_codes" = "0,2" ]; then
+  PASS=$((PASS + 1)); echo "PASS  approval token has exactly one atomic consumer"
+else
+  FAIL=$((FAIL + 1)); echo "FAIL  approval atomic claim exits=$race_codes (want 0,2)"
+fi
 
 # --- E6-3 production-target guard (F2-3) ---
 bt "e2e prod BASE_URL block" "e2e-runner" "playwright test" 2 "BASE_URL=https://example.com"
@@ -112,9 +169,18 @@ bt "e2e credential-userinfo BASE_URL block" "e2e-runner" "playwright test" 2 "BA
 bt "e2e protocol-relative base-url block" "e2e-runner" "playwright test --base-url=//example.com" 2
 bt "e2e localhost --base-url allow" "e2e-runner" "playwright test --base-url=http://localhost:3000" 0
 bt "e2e inline prod URL block" "e2e-runner" "playwright test --base-url=https://example.com" 2
+bt "e2e exact named staging allow" "e2e-runner" "playwright test --base-url=https://preview.example.net" 0 "E2E_ALLOWED_HOSTS=preview.example.net"
+bt "e2e unattested named staging block" "e2e-runner" "playwright test --base-url=https://preview.example.net" 2
+
+# Verified config/scheme bypass regressions (F2).
+printf "%s\n" "export default { use: { baseURL: 'https://prod.example.com' } }" > "$TEST_CWD/custom.conf.ts"
+bt "e2e --config custom.conf.ts prod baseURL block" "e2e-runner" "playwright test --config custom.conf.ts" 2
+printf "%s\n" "export default { use: { baseURL: 'https://localhost.evil.com' } }" > "$TEST_CWD/substring.conf.ts"
+bt "e2e config localhost substring host block" "e2e-runner" "playwright test --config substring.conf.ts" 2
+bt "e2e uppercase HTTP scheme prod URL block" "e2e-runner" "playwright test --base-url=HTTP://prod.example.com" 2
 
 # --- malformed payload → fail closed (only when agent_type names a gated agent) ---
-out="$(printf '%s' '{"agent_type":"e2e-runner","tool_input":{' | bash "$BASH_HOOK" 2>&1)"
+out="$(printf '%s' '{"agent_type":"e2e-runner","tool_input":{' | env AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" bash "$BASH_HOOK" 2>&1)"
 rc=$?
 if [ "$rc" -eq 2 ]; then
   PASS=$((PASS + 1)); echo "PASS  e2e bad JSON fail-closed"
@@ -122,7 +188,7 @@ else
   FAIL=$((FAIL + 1)); echo "FAIL  e2e bad JSON fail-closed (exit=$rc, want=2)"
 fi
 
-# --- F3-3/M4: settings.json must actually register the hook (runtime wiring) ---
+# --- F20: settings fixture/live install must register the hook; never silently skip ---
 if [ -f "$SETTINGS" ] && command -v python3 >/dev/null 2>&1 && python3 -c 'import json' 2>/dev/null; then
   if python3 - "$SETTINGS" <<'PY'
 import json, sys
@@ -137,7 +203,14 @@ PY
     FAIL=$((FAIL + 1)); echo "FAIL  settings.json does not register restrict-bash hook"
   fi
 else
-  echo "SKIP  settings registration check (SETTINGS=$SETTINGS, python3 unavailable)"
+  FAIL=$((FAIL + 1)); echo "FAIL  settings registration check unavailable (SETTINGS=$SETTINGS, python3 required)"
+fi
+
+if grep -Eq '^[0-9]+ agent_type=e2e-runner rule=allowlist decision=allow$' "$HOOK_AUDIT_LOG" \
+   && grep -Eq '^[0-9]+ agent_type=code-reviewer rule=review-only decision=deny$' "$HOOK_AUDIT_LOG"; then
+  PASS=$((PASS + 1)); echo "PASS  hook audit logs timestamp, agent_type, rule, and decision"
+else
+  FAIL=$((FAIL + 1)); echo "FAIL  hook audit log missing allow/deny decision lines"
 fi
 
 echo

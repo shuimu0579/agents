@@ -26,6 +26,9 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENTS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+AGENT_CONTRACT_FILE="$SCRIPT_DIR/fixtures/agent-contract.tsv"
+OUTPUT_CONTRACT_FIXTURE="$SCRIPT_DIR/fixtures/output-contract.md"
+LIVE_OUTPUT_CONTRACT="${OUTPUT_CONTRACT:-$HOME/.claude/rules/agent-output-contract.md}"
 STRICT=0
 for arg in "$@"; do [[ "$arg" == "--strict" ]] && STRICT=1; done
 
@@ -81,22 +84,29 @@ token_present() {
   grep -qF -- "$2" "$1"
 }
 
+# status_sets_equal <actual-pipe-list> <expected-semicolon-list>
+status_sets_equal() {
+  local actual expected
+  actual="$(printf '%s' "$1" | tr '|' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed '/^$/d' | sort)"
+  expected="$(printf '%s' "$2" | tr ';' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed '/^$/d' | sort)"
+  [[ "$actual" == "$expected" ]]
+}
+
 # ---------------------------------------------------------------------------
-# Contract table — the single source of truth for "what each agent must look like".
-#   name|expected_tools|verdict_anyof(;)|flag
+# Contract fixture — the single source of truth for agents and the Bash hook.
+#   name|expected_tools|model|domain_statuses(;)|flag
 #   flag: review_only | mutator
 # ---------------------------------------------------------------------------
-CONTRACT="$(cat <<'EOF'
-security-reviewer|Read, Grep, Glob|APPROVE WITH CHANGES|review_only
-code-reviewer|Read, Grep, Glob|APPROVE WITH CHANGES|review_only
-architect|Read, Grep, Glob|RECOMMEND|review_only
-e2e-runner|Read, Write, Edit, Bash, Grep, Glob|QUARANTINE|mutator
-EOF
-)"
+if [[ -f "$AGENT_CONTRACT_FILE" ]]; then
+  CONTRACT="$(grep -vE '^[[:space:]]*(#|$)' "$AGENT_CONTRACT_FILE" || true)"
+else
+  CONTRACT=""
+  fail "fleet: missing agent contract fixture $AGENT_CONTRACT_FILE"
+fi
 
 echo "==> guardrails: auditing $AGENTS_DIR"
 
-while IFS='|' read -r name exp_tools verdicts flag; do
+while IFS='|' read -r name exp_tools exp_model domain_statuses flag; do
   [[ -z "$name" ]] && continue
   f="$name.md"
   base="$name"
@@ -113,7 +123,9 @@ while IFS='|' read -r name exp_tools verdicts flag; do
     val="$(get_field "$f" "$field")"
     if [[ -z "$val" ]]; then fail "$f: missing required frontmatter field '$field'"; fi
   done
-  if [[ -z "$actual_tools" ]]; then
+  if grep -qE '^tools:[[:space:]]*$' "$f"; then
+    fail "$f: YAML-block tools are unsupported; use a comma string or JSON array (fail-closed)"
+  elif [[ -z "$actual_tools" ]]; then
     fail "$f: missing frontmatter field 'tools' (fleet invariant — omission inherits the parent tool pool)"
   elif tools_field_valid "$actual_tools"; then
     note "$f: tools present and valid"
@@ -126,6 +138,11 @@ while IFS='|' read -r name exp_tools verdicts flag; do
     note "$f: model present and valid"
   else
     fail "$f: invalid frontmatter field 'model': '$actual_model'"
+  fi
+  if [[ -n "$actual_model" && "$actual_model" != "$exp_model" ]]; then
+    fail "$f: model '$actual_model' != expected '$exp_model'"
+  else
+    note "$f: model == $exp_model"
   fi
 
   # name == filename
@@ -163,15 +180,14 @@ while IFS='|' read -r name exp_tools verdicts flag; do
       ;;
   esac
 
-  # 4. domain verdict token (any-of)
-  found=0
-  IFS=';' read -ra toks <<< "$verdicts"
-  for t in "${toks[@]}"; do
-    [[ -z "$t" ]] && continue
-    if token_present "$f" "$t"; then found=1; note "$f: verdict token '$t' present"; break; fi
-  done
-  if [[ "$found" -eq 0 ]]; then
-    fail "$f: none of verdict tokens [$verdicts] found (orchestrator contract drifted)"
+  # 4. Parse the actual Domain status template line; whole-file token mentions do not count.
+  domain_line="$(grep -m1 '^\*\*Domain status:\*\*' "$f" | sed 's/^\*\*Domain status:\*\*[[:space:]]*//' || true)"
+  if [[ -z "$domain_line" ]]; then
+    fail "$f: missing **Domain status:** template line"
+  elif status_sets_equal "$domain_line" "$domain_statuses"; then
+    note "$f: Domain status tokens exactly match [$domain_statuses]"
+  else
+    fail "$f: Domain status tokens '$domain_line' != expected '$domain_statuses'"
   fi
 
   # 4b. canonical orchestrator Verdict (grill F14) — every agent must emit GO|BLOCK|NEEDS_INPUT vocabulary
@@ -182,8 +198,8 @@ while IFS='|' read -r name exp_tools verdicts flag; do
   fi
 
   # 4b2. Verdict must be the final template line, after ## Handoff (contract: final line) — D-TOKEN freeze
-  _hln="$(grep -n '^## Handoff' "$f" | head -1 | cut -d: -f1)"
-  _vln="$(grep -n '^\*\*Verdict:\*\*' "$f" | head -1 | cut -d: -f1)"
+  _hln="$(grep -n '^## Handoff' "$f" | head -1 | cut -d: -f1 || true)"
+  _vln="$(grep -n '^\*\*Verdict:\*\*' "$f" | head -1 | cut -d: -f1 || true)"
   if [[ -n "$_hln" && -n "$_vln" && "$_vln" -gt "$_hln" ]]; then
     note "$f: Verdict after Handoff (final-line contract)"
   else
@@ -201,6 +217,22 @@ while IFS='|' read -r name exp_tools verdicts flag; do
       ;;
   esac
 done <<< "$CONTRACT"
+
+# F10: quarantine instructions require an issue and explicit ISO expiry; reject
+# any concrete active-agent expiry that is today or earlier.
+if token_present e2e-runner.md "Issue #N; expires YYYY-MM-DD"; then
+  note "e2e-runner.md: quarantine token requires issue + expiry"
+else
+  fail "e2e-runner.md: quarantine fixme must use 'Issue #N; expires YYYY-MM-DD'"
+fi
+_today="$(date +%F)"
+while IFS= read -r _expiry_token; do
+  [[ -z "$_expiry_token" ]] && continue
+  _expiry="${_expiry_token##*expires }"
+  if [[ "$_expiry" < "$_today" || "$_expiry" == "$_today" ]]; then
+    fail "fleet: expired quarantine token '$_expiry_token'"
+  fi
+done < <(grep -hoE 'Issue #[0-9]+; expires [0-9]{4}-[0-9]{2}-[0-9]{2}' ./*.md 2>/dev/null || true)
 
 # ---------------------------------------------------------------------------
 # Fleet-level checks
@@ -229,6 +261,16 @@ while IFS='|' read -r name _rest; do
   CONTRACT_NAMES+=("$name")
 done <<< "$CONTRACT"
 
+# F14: every root Markdown file except CLAUDE.md is an active agent and must be
+# represented in the contract, even if it lacks recognizable frontmatter.
+for f in ./*.md; do
+  [[ "$f" == "./CLAUDE.md" ]] && continue
+  root_name="${f#./}"; root_name="${root_name%.md}"
+  found=0
+  for c in "${CONTRACT_NAMES[@]}"; do [[ "$c" == "$root_name" ]] && found=1 && break; done
+  if [[ "$found" -eq 0 ]]; then fail "fleet: root Markdown $f is not in CONTRACT"; fi
+done
+
 for d in "${DISCOVERED[@]}"; do
   found=0
   for c in "${CONTRACT_NAMES[@]}"; do [[ "$c" == "$d" ]] && found=1 && break; done
@@ -252,28 +294,6 @@ else
   note "fleet: archive/ contains no .md (retired agents disabled)"
 fi
 
-# F33/F3-5: trigger fixtures single source + real fixture (agents match CONTRACT, positives present)
-if [[ -f tests/triggers.yml ]]; then
-  note "fleet: tests/triggers.yml present"
-  _t_agents="$(grep -E '^  - agent:' tests/triggers.yml | sed 's/^  - agent: *//' | sort)"
-  _c_agents="$(printf '%s\n' "${CONTRACT_NAMES[@]}" | sort)"
-  if [[ "$_t_agents" == "$_c_agents" ]]; then
-    note "fleet: triggers.yml agents == CONTRACT"
-  else
-    fail "fleet: triggers.yml agents != CONTRACT"
-  fi
-  for _a in "${CONTRACT_NAMES[@]}"; do
-    _blk="$(grep -A20 "^  - agent: $_a\$" tests/triggers.yml || true)"
-    if printf '%s' "$_blk" | grep -qE '^    positive:' && printf '%s' "$_blk" | grep -qE '^      - '; then
-      note "fleet: triggers fixtures for $_a present"
-    else
-      fail "fleet: triggers.yml missing positive fixture for $_a"
-    fi
-  done
-else
-  warn "fleet: tests/triggers.yml missing (F33)"
-fi
-
 # F18: e2e templates extracted
 if [[ -f templates/playwright.config.ts.tmpl && -f templates/e2e.github-actions.yml.tmpl ]]; then
   note "fleet: e2e templates present"
@@ -281,39 +301,39 @@ else
   warn "fleet: e2e templates missing under templates/"
 fi
 
+# F5: the hook must consume the same tracked contract fixture as guardrails.
+if grep -qF '../tests/fixtures/agent-contract.tsv' hooks/restrict-bash-by-agent.sh; then
+  note "fleet: Bash hook and guardrails share agent-contract.tsv"
+else
+  fail "fleet: Bash hook is not coupled to tests/fixtures/agent-contract.tsv"
+fi
 
-# Model policy (D2 settled 2026-08-09): architect→opus; code-reviewer/security-reviewer/e2e-runner→sonnet.
-check_model() {
-  local name="$1" policy="$2" m
-  m="$(get_field "$name.md" model)"
-  case "$policy" in
-    inherit)
-      if [[ -z "$m" || "$m" == "inherit" ]]; then
-        note "fleet: $name model=$m (inherit default)"
+# F16/F19/F23: CI validates the vendored output contract; local runs additionally
+# require the installed contract to be byte-identical when it exists.
+if [[ ! -f "$OUTPUT_CONTRACT_FIXTURE" ]]; then
+  fail "fleet: missing vendored output contract fixture"
+else
+  note "fleet: vendored output contract fixture present"
+  while IFS='|' read -r name _tools _model domain_statuses _flag; do
+    IFS=';' read -ra toks <<< "$domain_statuses"
+    for t in "${toks[@]}"; do
+      if grep -qF "| $name | $t |" "$OUTPUT_CONTRACT_FIXTURE"; then
+        note "fleet: output contract maps $name/$t"
       else
-        fail "fleet: $name model='$m' (expected inherit)"
+        fail "fleet: output contract missing exact row for $name/$t"
       fi
-      ;;
-    opus)
-      if [[ "$m" == "opus" ]]; then
-        note "fleet: $name model=opus"
-      else
-        fail "fleet: $name model='$m' (expected opus)"
-      fi
-      ;;
-    sonnet)
-      if [[ "$m" == "sonnet" ]]; then
-        note "fleet: $name model=sonnet"
-      else
-        fail "fleet: $name model='$m' (expected sonnet)"
-      fi
-      ;;
-  esac
-}
-check_model architect opus
-check_model code-reviewer sonnet
-check_model security-reviewer sonnet
-check_model e2e-runner sonnet
+    done
+  done <<< "$CONTRACT"
+  if [[ -f "$LIVE_OUTPUT_CONTRACT" ]]; then
+    if cmp -s "$OUTPUT_CONTRACT_FIXTURE" "$LIVE_OUTPUT_CONTRACT"; then
+      note "fleet: installed output contract == vendored fixture"
+    else
+      fail "fleet: installed output contract drifted from tests/fixtures/output-contract.md"
+    fi
+  else
+    note "fleet: installed output contract absent; vendored fixture is CI authority"
+  fi
+fi
 
 # ---------------------------------------------------------------------------
 # Report

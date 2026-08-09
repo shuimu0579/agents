@@ -1,1 +1,1 @@
-Create empty files named with-deps or snapshots (mode 600) from the main session to approve e2e privileged ops. Auto-deleted after one use; max age 300s.
+Create empty files named `with-deps` or `snapshots` (mode 600) from the main session to approve exact privileged Playwright command forms. The hook atomically claims and deletes each file after one use; tokens expire at age 300s.

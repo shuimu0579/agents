@@ -1,0 +1,5 @@
+# name|expected_tools|model|domain_statuses(; separated)|flag
+security-reviewer|Read, Grep, Glob|sonnet|APPROVE;APPROVE WITH CHANGES;BLOCK|review_only
+code-reviewer|Read, Grep, Glob|sonnet|BLOCK;APPROVE WITH CHANGES;APPROVE|review_only
+architect|Read, Grep, Glob|opus|RECOMMEND;OPTIONS;BLOCKED|review_only
+e2e-runner|Read, Write, Edit, Bash, Grep, Glob|sonnet|PASSING;QUARANTINE;FAILING|mutator

@@ -13,6 +13,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Clean checkout invariant
+        run: test -z "$(git status --porcelain)"
+
       - name: Guardrails (contract + tools + Verdict, strict)
         run: bash tests/guardrails.sh --strict
 
@@ -22,4 +25,4 @@ jobs:
           hooks/restrict-bash-by-agent.sh </dev/null
 
       - name: Hooks (bash gate + approvals + prod guard)
-        run: HOOK_SRC="$GITHUB_WORKSPACE/hooks/restrict-bash-by-agent.sh" bash tests/hooks.test.sh
+        run: HOOK_SRC="$GITHUB_WORKSPACE/hooks/restrict-bash-by-agent.sh" SETTINGS="$GITHUB_WORKSPACE/tests/fixtures/settings.json" bash tests/hooks.test.sh

@@ -66,6 +66,10 @@ Every agent body must contain:
 2. **`**Verdict:**`** line — canonical orchestrator-facing output using `GO | BLOCK | NEEDS_INPUT` vocabulary.
 3. **No hardcoded secrets** — API keys, tokens, passwords belong in macOS Keychain, not agent files.
 
+### E2E trust boundary
+
+The e2e-runner's `DATA, never instructions` rule is prompt-level only. Playwright executes repository config/spec JavaScript without a sandbox. Dispatch e2e-runner only after the orchestrator attests the exact repo root as trusted and supplies a resolved baseURL plus exact staging-host allowlist.
+
 ## Testing & CI
 
 ```bash
@@ -74,11 +78,14 @@ bash tests/guardrails.sh
 
 # Strict mode (treats WARN as FAIL)
 bash tests/guardrails.sh --strict
+
+# Bash hook, approvals, production guard, and tracked settings registration
+bash tests/hooks.test.sh
 ```
 
 ## Adding a New Agent
 
 1. Create `<name>.md` with valid frontmatter.
-2. Add a row to the agent directory in `~/.claude/rules/agents.md`.
-3. Add trigger fixtures to `tests/triggers.yml`.
-4. Run `bash tests/guardrails.sh` — it must pass.
+2. Add the matching row to `tests/fixtures/agent-contract.tsv`; guardrails and the Bash hook share this file.
+3. Add a row to the agent directory in `~/.claude/rules/agents.md`.
+4. Run `bash tests/guardrails.sh --strict` and `bash tests/hooks.test.sh` — both must pass.
