@@ -14,6 +14,8 @@ jobs:
           node-version: 20
       - name: Install dependencies
         run: npm ci
+      # CI runs install directly (orchestrator-sanctioned). The e2e-runner AGENT must never
+      # run this locally — it requires the one-shot hooks/approvals/with-deps token (grill F9).
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
       - name: Run E2E tests

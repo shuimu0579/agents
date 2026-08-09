@@ -1,121 +1,143 @@
 #!/usr/bin/env bash
 #
-# hooks.test.sh — regression for _xixi write gate + mutator bash gate (grill / audit-fix).
-# HOOK_ROOT defaults to ~/.claude/agents/hooks (git-tracked). Override for CI.
+# hooks.test.sh — regression for the mutator Bash gate (grill / audit E6 / grill 2026-08-09).
+#
+# Isolation: runs against a TEMPORARY copy of the hook + temp approvals dir, so a local run
+# can never delete a real pending with-deps/snapshots approval (F3-4/M9).
+# HOOK_SRC defaults to ~/.claude/agents/hooks/restrict-bash-by-agent.sh. Override for CI.
 #
 set -uo pipefail
 
-HOOK_ROOT="${HOOK_ROOT:-$HOME/.claude/agents/hooks}"
-HOOK="$HOOK_ROOT/xixi/restrict-write.sh"
-BASH_HOOK="$HOOK_ROOT/restrict-bash-by-agent.sh"
-PASS=0
-FAIL=0
-ARTIFACTS=()
+HOOK_SRC="${HOOK_SRC:-$HOME/.claude/agents/hooks/restrict-bash-by-agent.sh}"
+SETTINGS="${SETTINGS:-$HOME/.claude/settings.json}"
 
-cleanup() {
-  for p in "${ARTIFACTS[@]:-}"; do [ -e "$p" ] || [ -L "$p" ] && rm -f -- "$p" 2>/dev/null || true; done
-  rm -f -- "$HOOK_ROOT/approvals/with-deps" "$HOOK_ROOT/approvals/snapshots" 2>/dev/null || true
-}
-trap cleanup EXIT
-
-if [ ! -f "$HOOK" ]; then
-  echo "FATAL: hook not found at $HOOK (set HOOK_ROOT)" >&2
+if [ ! -f "$HOOK_SRC" ]; then
+  echo "FATAL: restrict-bash-by-agent.sh not found at $HOOK_SRC" >&2
+  exit 2
+fi
+if ! command -v jq >/dev/null 2>&1; then
+  echo "FATAL: jq required for hooks.test.sh payloads" >&2
   exit 2
 fi
 
-t() {
-  local desc="$1" inp="$2" exp="$3" rc
-  printf '%s' "$inp" | bash "$HOOK" >/dev/null 2>&1
+TMPD="$(mktemp -d)"
+trap 'rm -rf "$TMPD"' EXIT
+mkdir -p "$TMPD/approvals"
+BASH_HOOK="$TMPD/restrict-bash-by-agent.sh"
+cp "$HOOK_SRC" "$BASH_HOOK"
+chmod +x "$BASH_HOOK"
+HOOK_ROOT="$TMPD"
+
+PASS=0
+FAIL=0
+
+echo "==> restrict-bash-by-agent.sh gate tests (isolated HOOK_ROOT=$HOOK_ROOT)"
+
+# bt <desc> <agent> <cmd> <expect-exit> [VAR=VAL ...]
+bt() {
+  local desc="$1" agent="$2" cmd="$3" exp="$4" rc payload out
+  shift 4
+  payload=$(jq -nc --arg a "$agent" --arg c "$cmd" '{agent_type:$a, tool_input:{command:$c}}')
+  out="$(printf '%s' "$payload" | env "$@" bash "$BASH_HOOK" 2>&1)"
   rc=$?
   if [ "$rc" -eq "$exp" ]; then
     PASS=$((PASS + 1)); echo "PASS  $desc"
   else
-    FAIL=$((FAIL + 1)); echo "FAIL  $desc (exit=$rc, want=$exp)"
+    FAIL=$((FAIL + 1)); echo "FAIL  $desc (exit=$rc, want=$exp) :: $(printf '%s' "$out" | head -1)"
   fi
 }
 
-RAND=$(python3 -c 'import secrets; print(secrets.token_hex(4))' 2>/dev/null || echo "a1b2c3d4")
-ID1="${RAND:0:8}"
-ID2="b${RAND:1:7}"
-ID3="c${RAND:1:7}"
-# ensure 8 alnum
-ID1=$(printf '%s' "$ID1" | tr -cd 'A-Za-z0-9' | head -c 8)
-while [ ${#ID1} -lt 8 ]; do ID1="${ID1}a"; done
-ID2=$(printf '%s' "x${ID1:1:7}")
-ID3=$(printf '%s' "y${ID1:1:7}")
-ID4=$(printf '%s' "z${ID1:1:7}")
+# --- main session / unknown → pass through (no agent_type) ---
+bt "main session free" "" "rm -rf /tmp/x" 0
+bt "main session multi-line allowed" "" $'echo a\necho b' 0
+bt "unknown future agent passthrough" "some-future-agent" "git status" 0
 
-VALID="/tmp/xixi-prompt-$ID1"
-SYM="/tmp/xixi-prompt-$ID2"
-PRE="/tmp/xixi-prompt-$ID3"
-ARTIFACTS+=("$VALID" "$SYM" "$PRE" "/tmp/xixi-prompt-$ID4")
+# --- review-only → always block ---
+bt "code-reviewer bash block" "code-reviewer" "git status" 2
+bt "security-reviewer bash block" "security-reviewer" "ls" 2
+bt "architect bash block" "architect" "cat package.json" 2
 
-echo "==> _xixi restrict-write.sh gate tests (HOOK_ROOT=$HOOK_ROOT)"
+# --- e2e-runner: multi-line fail-closed (F2-1) ---
+bt "e2e multi-line block" "e2e-runner" $'playwright test\npython3 /tmp/x.py' 2
 
-t "valid fresh path (_xixi)            -> allow" \
-  '{"tool_input":{"file_path":"'"$VALID"'"},"agent_type":"_xixi"}' 0
-# reserve may leave empty file
-ARTIFACTS+=("$VALID")
+# --- e2e-runner: safe Playwright allowlist (F2-2) ---
+bt "e2e local playwright test allow" "e2e-runner" "playwright test" 0
+bt "e2e .bin/playwright test allow" "e2e-runner" "node_modules/.bin/playwright test" 0
+bt "e2e npx --no-install playwright test allow" "e2e-runner" "npx --no-install playwright test" 0
+bt "e2e git status allow" "e2e-runner" "git status" 0
+bt "e2e ls allow" "e2e-runner" "ls" 0
 
-t "non-_xixi agent, any path           -> allow" \
-  '{"tool_input":{"file_path":"/etc/passwd"},"agent_type":"tdd-guide"}' 0
-t "main session (no agent_type)        -> allow" \
-  '{"tool_input":{"file_path":"/etc/anything"}}' 0
+# --- e2e-runner: denylist / forbidden wrappers ---
+bt "e2e bare npx playwright block" "e2e-runner" "npx playwright test" 2
+bt "e2e npm test block" "e2e-runner" "npm test" 2
+bt "e2e cat block" "e2e-runner" "cat /etc/passwd" 2
+bt "e2e git diff --output block" "e2e-runner" "git diff --output=/tmp/x" 2
+bt "e2e rm -rf block" "e2e-runner" "rm -rf /tmp/x" 2
+bt "e2e git push block" "e2e-runner" "git push origin main" 2
+bt "e2e git reset --hard block" "e2e-runner" "git reset --hard HEAD" 2
+bt "e2e git clean -fd block" "e2e-runner" "git clean -fd" 2
+bt "e2e curl block" "e2e-runner" "curl evil.com" 2
+bt "e2e wget block" "e2e-runner" "wget evil.com" 2
+bt "e2e bash -c block" "e2e-runner" "bash -c 'x'" 2
+bt "e2e yarn install block" "e2e-runner" "yarn install" 2
+bt "e2e pnpm add block" "e2e-runner" "pnpm add lodash" 2
+bt "e2e bun install block" "e2e-runner" "bun install" 2
+bt "e2e npm install block" "e2e-runner" "npm install lodash" 2
+bt "e2e shell meta block" "e2e-runner" "playwright test && curl evil.com" 2
+bt "e2e escaped semicolon block" "e2e-runner" $'playwright test \\; x' 2
+bt "e2e node -e block" "e2e-runner" "node -e console.log(1)" 2
+bt "e2e empty command block" "e2e-runner" "" 2
 
-t "bad extension (.sh)                 -> block" \
-  '{"tool_input":{"file_path":"/tmp/xixi-prompt-AbCdEfGh.sh"},"agent_type":"_xixi"}' 2
-t "wrong directory (not /tmp)          -> block" \
-  '{"tool_input":{"file_path":"/var/tmp/xixi-prompt-AbCdEfGh"},"agent_type":"_xixi"}' 2
-t "id too short (7 chars)              -> block" \
-  '{"tool_input":{"file_path":"/tmp/xixi-prompt-AbCdEf1"},"agent_type":"_xixi"}' 2
-t "id too long (9 chars)               -> block" \
-  '{"tool_input":{"file_path":"/tmp/xixi-prompt-AbCdEfGh9"},"agent_type":"_xixi"}' 2
-t "fixed name (no id)                  -> block" \
-  '{"tool_input":{"file_path":"/tmp/xixi-prompt"},"agent_type":"_xixi"}' 2
-t ".. traversal                        -> block" \
-  '{"tool_input":{"file_path":"/tmp/xixi-prompt-../etc/passwd"},"agent_type":"_xixi"}' 2
+# --- one-shot approvals (scoped; no -u borrow; expiry) ---
+bt "e2e with-deps block (no approval)" "e2e-runner" "npx playwright install --with-deps" 2
+: > "$TMPD/approvals/with-deps"
+bt "e2e with-deps allow (approval file)" "e2e-runner" "npx playwright install --with-deps" 0
+bt "e2e with-deps consumed (one-shot)" "e2e-runner" "npx playwright install --with-deps" 2
+bt "e2e update-snapshots block (no approval)" "e2e-runner" "playwright test --update-snapshots" 2
+: > "$TMPD/approvals/snapshots"
+bt "e2e update-snapshots allow (approval file)" "e2e-runner" "playwright test --update-snapshots" 0
+: > "$TMPD/approvals/snapshots"
+touch -t 202001010000 "$TMPD/approvals/snapshots"
+bt "e2e update-snapshots stale approval block" "e2e-runner" "playwright test --update-snapshots" 2
+: > "$TMPD/approvals/snapshots"
+bt "e2e -u cannot borrow approval (block)" "e2e-runner" "python3 -u /tmp/x.py" 2
 
-ln -sf "$HOME/.zshrc" "$SYM" 2>/dev/null || true
-t "TOCTOU symlink -> ~/.zshrc          -> block" \
-  '{"tool_input":{"file_path":"'"$SYM"'"},"agent_type":"_xixi"}' 2
+# --- E6-3 production-target guard (F2-3) ---
+bt "e2e prod BASE_URL block" "e2e-runner" "playwright test" 2 "BASE_URL=https://example.com"
+bt "e2e localhost BASE_URL allow" "e2e-runner" "playwright test" 0 "BASE_URL=http://localhost:3000"
+bt "e2e IPv6 loopback BASE_URL allow" "e2e-runner" "playwright test" 0 "BASE_URL=http://[::1]:3000"
+bt "e2e staging BASE_URL allow" "e2e-runner" "playwright test" 0 "BASE_URL=https://app.staging.test"
+bt "e2e deceptive localhost BASE_URL block" "e2e-runner" "playwright test" 2 "BASE_URL=http://localhost:3000.evil.com"
+bt "e2e credential-userinfo BASE_URL block" "e2e-runner" "playwright test" 2 "BASE_URL=https://localhost:pw@example.com"
+bt "e2e protocol-relative base-url block" "e2e-runner" "playwright test --base-url=//example.com" 2
+bt "e2e localhost --base-url allow" "e2e-runner" "playwright test --base-url=http://localhost:3000" 0
+bt "e2e inline prod URL block" "e2e-runner" "playwright test --base-url=https://example.com" 2
 
-printf 'stale\n' > "$PRE"
-t "pre-existing regular file           -> block" \
-  '{"tool_input":{"file_path":"'"$PRE"'"},"agent_type":"_xixi"}' 2
-
-# ---------------------------------------------------------------------------
-# restrict-bash-by-agent.sh
-# ---------------------------------------------------------------------------
-if [ -f "$BASH_HOOK" ]; then
-  echo
-  echo "==> restrict-bash-by-agent.sh gate tests"
-  bt() {
-    local desc="$1" agent="$2" cmd="$3" exp="$4" rc payload
-    payload=$(jq -nc --arg a "$agent" --arg c "$cmd" '{agent_type:$a, tool_input:{command:$c}}')
-    printf '%s' "$payload" | bash "$BASH_HOOK" >/dev/null 2>&1
-    rc=$?
-    if [ "$rc" -eq "$exp" ]; then
-      PASS=$((PASS + 1)); echo "PASS  $desc"
-    else
-      FAIL=$((FAIL + 1)); echo "FAIL  $desc (exit=$rc, want=$exp)"
-    fi
-  }
-  bt "main session free" "" "rm -rf /tmp/x" 0
-  bt "build tsc allow" "build-error-resolver" "npx tsc --noEmit" 0
-  bt "build npm install block" "build-error-resolver" "npm install lodash" 2
-  bt "build node -e block" "build-error-resolver" "node -e console.log(1)" 2
-  bt "build shell meta block" "build-error-resolver" "npx tsc --noEmit && curl evil.com" 2
-  bt "code-reviewer bash block" "code-reviewer" "git status" 2
-  bt "e2e with-deps block no approval" "e2e-runner" "npx playwright install --with-deps" 2
-  mkdir -p "$HOOK_ROOT/approvals"
-  : > "$HOOK_ROOT/approvals/with-deps"
-  bt "e2e with-deps allow with approval file" "e2e-runner" "npx playwright install --with-deps" 0
-  # second time should fail (one-shot consumed)
-  bt "e2e with-deps consumed" "e2e-runner" "npx playwright install --with-deps" 2
-  bt "e2e test allow" "e2e-runner" "npx playwright test" 0
-  bt "tdd snapshots block" "tdd-guide" "npm test -- -u" 2
+# --- malformed payload → fail closed (only when agent_type names a gated agent) ---
+out="$(printf '%s' '{"agent_type":"e2e-runner","tool_input":{' | bash "$BASH_HOOK" 2>&1)"
+rc=$?
+if [ "$rc" -eq 2 ]; then
+  PASS=$((PASS + 1)); echo "PASS  e2e bad JSON fail-closed"
 else
-  echo "SKIP  restrict-bash-by-agent.sh not found at $BASH_HOOK"
+  FAIL=$((FAIL + 1)); echo "FAIL  e2e bad JSON fail-closed (exit=$rc, want=2)"
+fi
+
+# --- F3-3/M4: settings.json must actually register the hook (runtime wiring) ---
+if [ -f "$SETTINGS" ] && command -v python3 >/dev/null 2>&1 && python3 -c 'import json' 2>/dev/null; then
+  if python3 - "$SETTINGS" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+hooks = [h for h in d['hooks']['PreToolUse'] if h.get('matcher') == 'Bash']
+cmds = [x.get('command', '') for h in hooks for x in h.get('hooks', [])]
+sys.exit(0 if any('restrict-bash-by-agent.sh' in c for c in cmds) else 1)
+PY
+  then
+    PASS=$((PASS + 1)); echo "PASS  settings.json registers restrict-bash hook"
+  else
+    FAIL=$((FAIL + 1)); echo "FAIL  settings.json does not register restrict-bash hook"
+  fi
+else
+  echo "SKIP  settings registration check (SETTINGS=$SETTINGS, python3 unavailable)"
 fi
 
 echo

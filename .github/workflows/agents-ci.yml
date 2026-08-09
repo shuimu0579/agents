@@ -1,5 +1,4 @@
 # agents-ci — regression net for the Claude Code agent fleet (grill F5)
-# Hooks are vendored under ./hooks (same tree as agents).
 name: agents-ci
 
 on:
@@ -14,15 +13,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install jq (hook JSON parse)
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
+      - name: Guardrails (contract + tools + Verdict, strict)
+        run: bash tests/guardrails.sh --strict
 
-      - name: Guardrails (contract + tools + Verdict)
-        run: bash tests/guardrails.sh
-
-      - name: Hook unit tests (xixi + bash gate)
-        env:
-          HOOK_ROOT: ${{ github.workspace }}/hooks
+      - name: Hook executable + direct invocation
         run: |
-          chmod +x hooks/restrict-bash-by-agent.sh hooks/xixi/*.sh
-          bash tests/hooks.test.sh
+          test -x hooks/restrict-bash-by-agent.sh
+          hooks/restrict-bash-by-agent.sh </dev/null
+
+      - name: Hooks (bash gate + approvals + prod guard)
+        run: HOOK_SRC="$GITHUB_WORKSPACE/hooks/restrict-bash-by-agent.sh" bash tests/hooks.test.sh
