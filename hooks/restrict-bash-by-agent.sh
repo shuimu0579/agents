@@ -49,6 +49,32 @@ else
   fi
 fi
 
+# F3-3: opt-in attribution audit. This is deliberately best-effort: logging must
+# never alter the policy decision, including when HOME/date/jq or the log path fails.
+debug_attribution() {
+  [[ "${HOOK_DEBUG:-}" == "1" ]] || return 0
+  (
+    local epoch tool logged_agent logged_tool logged_cmd log_path
+    [[ -n "${HOME:-}" ]] || exit 0
+    epoch=$(date +%s 2>/dev/null || printf '0')
+    tool=""
+    if command -v jq >/dev/null 2>&1; then
+      tool=$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null || true)
+    fi
+    logged_agent="${agent//$'\n'/ }"
+    logged_agent="${logged_agent//$'\r'/ }"
+    logged_tool="${tool//$'\n'/ }"
+    logged_tool="${logged_tool//$'\r'/ }"
+    logged_cmd="${cmd//$'\n'/ }"
+    logged_cmd="${logged_cmd//$'\r'/ }"
+    logged_cmd="${logged_cmd:0:80}"
+    log_path="${HOME}/.claude/agents/hooks/agent-type.log"
+    printf '%s agent_type=%s tool_name=%s command=%s\n' \
+      "$epoch" "$logged_agent" "$logged_tool" "$logged_cmd" >> "$log_path"
+  ) 2>/dev/null || true
+}
+debug_attribution
+
 block() {
   local reason="$1"
   # Do not echo untrusted command bodies (may contain secrets) — rule id only.
