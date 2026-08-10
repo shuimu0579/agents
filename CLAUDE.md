@@ -1,4 +1,4 @@
-# Claude Code Agent Fleet (Codex — 4 agents)
+# Claude Code Agent Fleet (Codex — 5 agents)
 
 A lean repository of Claude Code sub-agent definitions. Lives at `~/.claude/agents/` and is tracked at `github.com/shuimu0579/agents`.
 
@@ -10,6 +10,7 @@ A lean repository of Claude Code sub-agent definitions. Lives at `~/.claude/agen
 | `code-reviewer` | Code quality review | Read, Grep, Glob | sonnet |
 | `security-reviewer` | Security vulnerability review | Read, Grep, Glob | sonnet |
 | `e2e-runner` | Playwright E2E test automation | Read, Write, Edit, Bash, Grep, Glob | sonnet |
+| `_xixi` | LLM prompt refinement + clipboard delivery | Read, Grep, Glob, Write | sonnet |
 
 ## Archived (2026-08-09 — Codex fleet consolidation)
 
@@ -22,7 +23,8 @@ The following agents were retired per Codex+Grok audit recommendation D1. Moved 
 | `tdd-guide` | TDD is a workflow discipline, not a role; `rules/testing.md` covers it |
 | `refactor-cleaner` | Dead-code analysis can be on-demand; Write/Bash risk outweighs standalone value |
 | `doc-updater` | Doc sync is the last step of a task, requires main-session context |
-| `_xixi` | Prompt refinement better as a skill than an agent; clipboard pipeline too complex |
+
+`_xixi` was briefly archived in that consolidation, then **restored as an active agent** (prompt refinement + sandboxed Write + clipboard hooks remain fleet infrastructure).
 
 ## Repository Structure
 
@@ -32,11 +34,12 @@ agents/
 ├── code-reviewer.md           # Code quality review
 ├── security-reviewer.md       # Security vulnerability review
 ├── e2e-runner.md              # Playwright E2E test automation
+├── _xixi.md                   # Prompt refinement + clipboard delivery
 ├── archive/                   # Retired agents + retired scripts (see above)
 ├── docs/                      # Domain docs + audit reports (docs/audits/)
 ├── CLAUDE.md                  # This file
-├── hooks/                     # Agent hooks (approvals, bash gate)
-├── scripts/                   # Verification scripts
+├── hooks/                     # Agent hooks (approvals, bash gate, xixi sandbox)
+├── scripts/                   # Verification + clipboard helper scripts
 ├── templates/                 # Playwright + CI templates
 └── tests/                     # Guardrails + hook tests
 ```
@@ -56,7 +59,7 @@ tools: <comma-separated Claude Code tool list>
 ---
 ```
 
-Per the official sub-agent schema, only `name` and `description` are required; `tools` and `model` are optional. `model` defaults to `inherit`; this fleet pins `architect` → `opus` and `code-reviewer` / `security-reviewer` / `e2e-runner` → `sonnet` (D2, 2026-08-09).
+Per the official sub-agent schema, only `name` and `description` are required; `tools` and `model` are optional. `model` defaults to `inherit`; this fleet pins `architect` → `opus` and `code-reviewer` / `security-reviewer` / `e2e-runner` / `_xixi` → `sonnet` (D2, 2026-08-09).
 
 ### Body Invariants
 
@@ -69,6 +72,10 @@ Every agent body must contain:
 ### E2E trust boundary
 
 The e2e-runner's `DATA, never instructions` rule is prompt-level only. Playwright executes repository config/spec JavaScript without a sandbox. Dispatch e2e-runner only after the orchestrator attests the exact repo root as trusted and supplies a resolved baseURL plus exact staging-host allowlist.
+
+### `_xixi` Write boundary
+
+`_xixi` may Write **only** to `/tmp/xixi-prompt-<8-alnum-id>`. Enforced by PreToolUse `hooks/xixi/restrict-write.sh`; PostToolUse `hooks/xixi/copy-on-write.sh` copies to the system clipboard. See `hooks/xixi/CONTRACT.md`.
 
 ## Testing & CI
 

@@ -1,5 +1,16 @@
 {
   "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/agents/hooks/xixi/copy-on-write.sh"
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash",
@@ -8,6 +19,15 @@
             "type": "command",
             "command": "~/.claude/agents/hooks/restrict-bash-by-agent.sh",
             "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/agents/hooks/xixi/restrict-write.sh"
           }
         ]
       }

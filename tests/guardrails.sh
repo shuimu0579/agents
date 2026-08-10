@@ -317,7 +317,9 @@ else
   while IFS='|' read -r name _tools _model domain_statuses _flag; do
     IFS=';' read -ra toks <<< "$domain_statuses"
     for t in "${toks[@]}"; do
-      if grep -qF "| $name | $t |" "$OUTPUT_CONTRACT_FIXTURE"; then
+      # Accept bare or backtick-wrapped domain tokens (live contract uses `TOKEN`).
+      if grep -qF "| $name | $t |" "$OUTPUT_CONTRACT_FIXTURE" \
+        || grep -qF "| $name | \`$t\` |" "$OUTPUT_CONTRACT_FIXTURE"; then
         note "fleet: output contract maps $name/$t"
       else
         fail "fleet: output contract missing exact row for $name/$t"

@@ -88,6 +88,10 @@ bt "code-reviewer bash block" "code-reviewer" "git status" 2
 bt "security-reviewer bash block" "security-reviewer" "ls" 2
 bt "architect bash block" "architect" "cat package.json" 2
 
+# --- _xixi is a sandbox mutator (Write /tmp only) — Bash never on allowlist ---
+bt "_xixi bash block" "_xixi" "git status" 2
+bt "_xixi bash block ls" "_xixi" "ls" 2
+
 # --- e2e-runner: multi-line fail-closed (F2-1) ---
 bt "e2e multi-line block" "e2e-runner" $'playwright test\npython3 /tmp/x.py' 2
 
