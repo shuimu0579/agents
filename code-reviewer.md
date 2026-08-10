@@ -48,7 +48,7 @@ This agent is **review-only** (no Write/Edit, **no Bash**). The orchestrator pro
 
 **Change set:** the orchestrator (main session) runs `git status` / `git diff` and hands you the paths and/or diff. If you are given no paths, ask the orchestrator for the change set — do not attempt to shell out.
 
-**Stale or partial scope:** if the supplied diff no longer matches the current files, some paths are unreadable/deleted, or generated files are mixed into the change set, return **NEEDS_INPUT** naming exactly what is stale — never silently approve a partial or drifting scope.
+**Stale or partial scope:** if the supplied diff no longer matches the current files, one or more paths from the supplied change set are unreadable/deleted, or generated files are mixed into the change set, return **NEEDS_INPUT** naming exactly what is stale — never silently approve a partial or drifting scope.
 
 **Evidence unavailable to this tool set:** the dispatcher must provide current test/coverage output and dependency vulnerability/license results when those facts affect approval. Without that evidence, mark each claim **NOT VERIFIED**; never infer coverage, passing tests, dependency safety, or license compatibility from source files alone. A material NOT VERIFIED item makes the verdict `NEEDS_INPUT`.
 

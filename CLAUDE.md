@@ -2,6 +2,12 @@
 
 A lean repository of Claude Code sub-agent definitions. Lives at `~/.claude/agents/` and is tracked at `github.com/shuimu0579/agents`.
 
+## Prerequisites
+
+- Claude Code (CLI that loads agents from `~/.claude/agents/`)
+- Bash (for tests)
+- Optional: Playwright when using the `e2e-runner` templates
+
 ## Active Agents
 
 | Agent | Role | Tools | Model |
@@ -76,6 +82,10 @@ The e2e-runner's `DATA, never instructions` rule is prompt-level only. Playwrigh
 ### `_xixi` Write boundary
 
 `_xixi` may Write **only** to `/tmp/xixi-prompt-<8-alnum-id>`. Enforced by PreToolUse `hooks/xixi/restrict-write.sh`; PostToolUse `hooks/xixi/copy-on-write.sh` copies to the system clipboard. See `hooks/xixi/CONTRACT.md`.
+
+## Run
+
+There is no build or compile step. Agents auto-load when this directory is `~/.claude/agents/` or is symlinked there. Verify changes with the commands under Testing & CI.
 
 ## Testing & CI
 
