@@ -4,3 +4,4 @@ code-reviewer|Read, Grep, Glob|sonnet|BLOCK;APPROVE WITH CHANGES;APPROVE|review_
 architect|Read, Grep, Glob|opus|RECOMMEND;OPTIONS;BLOCKED|review_only
 e2e-runner|Read, Write, Edit, Bash, Grep, Glob|sonnet|PASSING;QUARANTINE;FAILING|mutator
 _xixi|Read, Grep, Glob, Write|sonnet|✅ copied;⚠️ failed|mutator
+_critical_thinking|Read, Grep, Glob|sonnet|SOUND;INCOMPLETE;UNSOUND|review_only

@@ -1,4 +1,4 @@
-# Claude Code Agent Fleet (Codex — 5 agents)
+# Claude Code Agent Fleet (Codex — 6 agents)
 
 A lean repository of Claude Code sub-agent definitions. Lives at `~/.claude/agents/` and is tracked at `github.com/shuimu0579/agents`.
 
@@ -17,6 +17,7 @@ A lean repository of Claude Code sub-agent definitions. Lives at `~/.claude/agen
 | `security-reviewer` | Security vulnerability review | Read, Grep, Glob | sonnet |
 | `e2e-runner` | Playwright E2E test automation | Read, Write, Edit, Bash, Grep, Glob | sonnet |
 | `_xixi` | LLM prompt refinement + clipboard delivery | Read, Grep, Glob, Write | sonnet |
+| `_critical_thinking` | Critical thinking guide (Beyond Feelings) | Read, Grep, Glob | sonnet |
 
 ## Archived (2026-08-09 — Codex fleet consolidation)
 
@@ -41,8 +42,10 @@ agents/
 ├── security-reviewer.md       # Security vulnerability review
 ├── e2e-runner.md              # Playwright E2E test automation
 ├── _xixi.md                   # Prompt refinement + clipboard delivery
+├── _critical_thinking.md      # Critical thinking guide (Beyond Feelings)
 ├── archive/                   # Retired agents + retired scripts (see above)
 ├── docs/                      # Domain docs + audit reports (docs/audits/)
+│   └── critical-thinking/     # Distilled Beyond Feelings principles
 ├── CLAUDE.md                  # This file
 ├── hooks/                     # Agent hooks (approvals, bash gate, xixi sandbox)
 ├── scripts/                   # Verification + clipboard helper scripts
@@ -65,7 +68,7 @@ tools: <comma-separated Claude Code tool list>
 ---
 ```
 
-Per the official sub-agent schema, only `name` and `description` are required; `tools` and `model` are optional. `model` defaults to `inherit`; this fleet pins `architect` → `opus` and `code-reviewer` / `security-reviewer` / `e2e-runner` / `_xixi` → `sonnet` (D2, 2026-08-09).
+Per the official sub-agent schema, only `name` and `description` are required; `tools` and `model` are optional. `model` defaults to `inherit`; this fleet pins `architect` → `opus` and `code-reviewer` / `security-reviewer` / `e2e-runner` / `_xixi` / `_critical_thinking` → `sonnet` (D2, 2026-08-09).
 
 ### Body Invariants
 
@@ -82,6 +85,10 @@ The e2e-runner's `DATA, never instructions` rule is prompt-level only. Playwrigh
 ### `_xixi` Write boundary
 
 `_xixi` may Write **only** to `/tmp/xixi-prompt-<8-alnum-id>`. Enforced by PreToolUse `hooks/xixi/restrict-write.sh`; PostToolUse `hooks/xixi/copy-on-write.sh` copies to the system clipboard. See `hooks/xixi/CONTRACT.md`.
+
+### `_critical_thinking` book boundary
+
+Do not commit *Beyond Feelings* (or any copyrighted book) into this repo. Distilled principles live in `docs/critical-thinking/beyond-feelings-principles.md`. The agent may distill from user-supplied excerpts in-report; the main session updates that catalog.
 
 ## Run
 

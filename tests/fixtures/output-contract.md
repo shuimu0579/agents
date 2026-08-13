@@ -60,8 +60,11 @@ Guardrails match exact rows of the form `| <agent> | <token> |` (optional backti
 | e2e-runner | FAILING | BLOCK |
 | _xixi | ✅ copied | GO |
 | _xixi | ⚠️ failed | NEEDS_INPUT |
+| _critical_thinking | SOUND | GO |
+| _critical_thinking | INCOMPLETE | NEEDS_INPUT |
+| _critical_thinking | UNSOUND | BLOCK |
 
-> **Active fleet:** `architect`, `code-reviewer`, `security-reviewer`, `e2e-runner`, `_xixi`.  
+> **Active fleet:** `architect`, `code-reviewer`, `security-reviewer`, `e2e-runner`, `_xixi`, `_critical_thinking`.  
 > **Archived 2026-08-09 (reference only):** `planner`, `tdd-guide`, `refactor-cleaner`, `build-error-resolver`, `doc-updater` live in the main session — not part of this fleet.
 
 ## Report skeleton (recommended)
@@ -96,10 +99,11 @@ architect (design) → main session / implementer (implementation)
   → code-reviewer (same-scope final review when e2e-runner changed specs)
 
 _xixi (prompt refinement) is independent of the merge pipeline; hand off to the user (clipboard or paste fallback).
+_critical_thinking (inquiry) is independent of the merge pipeline; hand off to the user, or to architect / code-reviewer / security-reviewer when the now-examined question belongs there.
 ```
 
 ## Mutator mutex
 
 - Repo mutator: `e2e-runner` (Read, Write, Edit, Bash, Grep, Glob). Only one **repo** mutator instance runs at a time.
 - Sandbox mutator: `_xixi` (Read, Grep, Glob, Write) — Write only to `/tmp/xixi-prompt-<8-alnum>`; may run in parallel with review-only agents.
-- Review-only agents (`architect`, `code-reviewer`, `security-reviewer`) may run in parallel with each other and with at most one `e2e-runner`.
+- Review-only agents (`architect`, `code-reviewer`, `security-reviewer`, `_critical_thinking`) may run in parallel with each other and with at most one `e2e-runner`.

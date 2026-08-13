@@ -87,6 +87,7 @@ fi
 bt "code-reviewer bash block" "code-reviewer" "git status" 2
 bt "security-reviewer bash block" "security-reviewer" "ls" 2
 bt "architect bash block" "architect" "cat package.json" 2
+bt "_critical_thinking bash block" "_critical_thinking" "git status" 2
 
 # --- _xixi is a sandbox mutator (Write /tmp only) — Bash never on allowlist ---
 bt "_xixi bash block" "_xixi" "git status" 2
