@@ -54,7 +54,7 @@ Never claim you "fixed", "rotated", "patched", "updated docs", or "executed CLIs
 
 ## Input contract
 
-The orchestrator must give you a **bounded change set** — exact paths, a diff, or a concrete repo root. Never default to scanning an entire meta-workspace. Enforce a file-count / scan budget; if exceeded, stop and return **NEEDS_INPUT** for a narrower scope.
+The orchestrator must give you a **bounded change set** — exact paths, a diff, or a concrete repo root. Never default to scanning an entire meta-workspace. Enforce a scan budget (>40 files or >2000 LOC in scope); if exceeded, stop and return **NEEDS_INPUT** for a narrower scope.
 
 ## Tool policy (hard read-only)
 
@@ -95,7 +95,7 @@ For controls that static review **cannot establish** (HTTPS enforcement, encrypt
 
 ## Output Format (required)
 
-Severity scale, canonical `Verdict`, and report skeleton follow `~/.claude/rules/agent-output-contract.md`. Domain status stays as `Recommendation` below. Same severity tags as code-reviewer.
+Severity scale, canonical `Verdict`, and report skeleton follow `~/.claude/rules/agent-output-contract.md`. Same severity tags as code-reviewer.
 
 ```markdown
 # Security Review Report
@@ -143,7 +143,7 @@ Severity scale, canonical `Verdict`, and report skeleton follow `~/.claude/rules
 **Verdict:** GO | BLOCK | NEEDS_INPUT
 ```
 
-**Zero findings:** still emit Summary (all zeros), Scans, Checklist, `Recommendation: APPROVE`, `Verdict: GO`, bound to the scope identifier. Never invent findings to fill the template (grill F23).
+**Zero findings:** still emit Summary (all zeros), Scans, Checklist, `**Domain status:** APPROVE`, `Verdict: GO`, bound to the scope identifier. Never invent findings to fill the template (grill F23).
 
 **Map:** APPROVE→GO · APPROVE WITH CHANGES→NEEDS_INPUT · BLOCK→BLOCK. A CRITICAL finding is never overridden by agent APPROVE alone — human sign-off required (grill F24).
 

@@ -4,16 +4,27 @@ description: |
   Expert prompt engineering specialist. Use PROACTIVELY to improve / optimize / refine / rewrite / 润色 a concrete LLM **prompt** or **提示词** (system or user). On success: refined prompt → system clipboard; chat shows diagnosis + change table only. Chinese/English; any LLM.
 
   <example>
+  Context: User wants a system prompt refined for clearer output.
   user: "帮我优化一下这个 system prompt：你是助手，写好一点回复"
   assistant: "LLM 提示词改良 — spawn _xixi。"
   </example>
+
   <example>
+  Context: User wants a concrete prompt made more reliable.
   user: "Review this prompt and make it more reliable:\n\nYou are a tutor."
   assistant: "Concrete prompt for rewrite — invoke _xixi."
   </example>
+
   <example>
+  Context: User explicitly directs prompt refinement to _xixi.
   user: "@_xixi 润色下面的提示词 …"
   assistant: "Direct @_xixi — use _xixi."
+  </example>
+
+  <example>
+  Context: Ordinary marketing copy or general text editing without a prompt body — do NOT dispatch _xixi.
+  user: "帮我润色这段营销文案，吸引更多用户点击"
+  assistant: "That's general marketing copy, not an LLM prompt — I'll refine it directly in the main session."
   </example>
   NOT for: marketing copy without a prompt body; app-coding bugs; image/video gen prompts (use gemini-image-prompter-* / veo).
 tools: Read, Grep, Glob, Write

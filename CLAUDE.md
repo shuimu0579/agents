@@ -105,6 +105,9 @@ bash tests/guardrails.sh --strict
 
 # Bash hook, approvals, production guard, and tracked settings registration
 bash tests/hooks.test.sh
+
+# _xixi Write sandbox and clipboard delivery hooks
+bash tests/xixi-hooks.test.sh
 ```
 
 ## Adding a New Agent
@@ -112,4 +115,4 @@ bash tests/hooks.test.sh
 1. Create `<name>.md` with valid frontmatter.
 2. Add the matching row to `tests/fixtures/agent-contract.tsv`; guardrails and the Bash hook share this file.
 3. Add a row to the agent directory in `~/.claude/rules/agents.md`.
-4. Run `bash tests/guardrails.sh --strict` and `bash tests/hooks.test.sh` — both must pass.
+4. Run `bash tests/guardrails.sh --strict`, `bash tests/hooks.test.sh`, and `bash tests/xixi-hooks.test.sh` — all must pass.
