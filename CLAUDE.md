@@ -48,9 +48,14 @@ agents/
 │   └── critical-thinking/     # Distilled Beyond Feelings principles
 ├── CLAUDE.md                  # This file
 ├── hooks/                     # Agent hooks (approvals, bash gate, xixi sandbox)
+│   ├── lib/                   # Shared modular libraries (core, fs, security, xixi)
+│   ├── approvals/             # One-shot approval files
+│   └── xixi/                  # _xixi Write sandbox & clipboard hooks
 ├── scripts/                   # Verification + clipboard helper scripts
 ├── templates/                 # Playwright + CI templates
 └── tests/                     # Guardrails + hook tests
+    ├── lib/                   # Shared test assertions & sandbox harness
+    └── run_all.sh             # Unified test suite runner
 ```
 
 ## Agent Definition Contract
@@ -97,10 +102,10 @@ There is no build or compile step. Agents auto-load when this directory is `~/.c
 ## Testing & CI
 
 ```bash
-# Full contract gate (frontmatter, tools, verdict tokens, line budget, fleet integrity)
-bash tests/guardrails.sh
+# Run all test suites at once (Guardrails strict + Bash hooks + Xixi hooks + Hook E2E)
+bash tests/run_all.sh
 
-# Strict mode (treats WARN as FAIL)
+# Full contract gate (frontmatter, tools, verdict tokens, line budget, fleet integrity)
 bash tests/guardrails.sh --strict
 
 # Bash hook, approvals, production guard, and tracked settings registration
@@ -108,6 +113,9 @@ bash tests/hooks.test.sh
 
 # _xixi Write sandbox and clipboard delivery hooks
 bash tests/xixi-hooks.test.sh
+
+# Hook E2E registration & mock execution
+bash tests/hook-e2e.test.sh
 ```
 
 ## Adding a New Agent

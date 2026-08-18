@@ -30,6 +30,9 @@ mkdir -p "$TEST_CWD"
 BASH_HOOK="$TMPD/restrict-bash-by-agent.sh"
 cp "$HOOK_SRC" "$BASH_HOOK"
 chmod +x "$BASH_HOOK"
+if [[ -d "$(dirname "$HOOK_SRC")/lib" ]]; then
+  cp -R "$(dirname "$HOOK_SRC")/lib" "$TMPD/lib"
+fi
 HOOK_ROOT="$TMPD"
 HOOK_AUDIT_LOG="$TMPD/bash-gate.audit.log"
 

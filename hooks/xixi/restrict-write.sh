@@ -14,6 +14,9 @@ input=$(cat)
 
 deny() {
   local reason="$1"
+  if declare -F hook_deny_pre >/dev/null 2>&1; then
+    hook_deny_pre "$reason"
+  fi
   echo "$reason" >&2
   if command -v jq >/dev/null 2>&1; then
     jq -nc --arg reason "$reason" \

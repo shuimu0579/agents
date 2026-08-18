@@ -51,6 +51,10 @@ mkdir -p "$HOOK_DIR"
 cp "$COMMON_SRC" "$HOOK_DIR/common.sh"
 cp "$RESTRICT_HOOK_SRC" "$HOOK_DIR/restrict-write.sh"
 cp "$COPY_HOOK_SRC" "$HOOK_DIR/copy-on-write.sh"
+if [[ -d "$(dirname "$COMMON_SRC")/../lib" ]]; then
+  mkdir -p "$TMPD/hooks/lib"
+  cp -R "$(dirname "$COMMON_SRC")/../lib/"* "$TMPD/hooks/lib/"
+fi
 chmod +x "$HOOK_DIR/common.sh" "$HOOK_DIR/restrict-write.sh" "$HOOK_DIR/copy-on-write.sh"
 
 COPY_STUB="$TMPD/copy-stub.sh"
