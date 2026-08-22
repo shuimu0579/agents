@@ -1,12 +1,14 @@
-# >>> cc-suite-claude-mcp >>>
 [mcp_servers.claude-code]
 command = "npx"
-args    = ["-y", "claude-octopus@1.2.0"]
-env     = {}
-# Codex default tool_timeout_sec is too short for claude_code calls: a
-# single multi-turn agent invocation can run several minutes, so 900s
-# matches the forward-direction codex-runner deadline. startup_timeout_sec
-# covers cold-cache npx -y downloads on first launch.
+args = [
+    "-y",
+    "claude-octopus@1.2.0",
+]
 startup_timeout_sec = 60
-tool_timeout_sec    = 900
-# <<< cc-suite-claude-mcp <<<
+tool_timeout_sec = 900
+
+[mcp_servers.claude-code.env]
+
+[mcp_servers.codex-cli]
+command = "codex"
+args = ["mcp-server"]

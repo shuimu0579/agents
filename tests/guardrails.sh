@@ -246,7 +246,7 @@ while IFS= read -r f; do
   base="${f#./}"; base="${base%.md}"
   # Skip non-agent paths
   case "$f" in
-    ./CLAUDE.md|./archive/*|./docs/*|./tests/*|./templates/*|./scripts/*|./hooks/*|./.github/*|./.git/*|./.claude/*|./grill-report-*|./codex-*) continue ;;
+    ./CLAUDE.md|./AGENTS.md|./archive/*|./docs/*|./tests/*|./templates/*|./scripts/*|./hooks/*|./.github/*|./.git/*|./.claude/*|./grill-report-*|./codex-*) continue ;;
   esac
   [[ "$base" == .* ]] && continue
   # Only agent-like files (agent frontmatter present) count — reports/docs are not agents
@@ -261,10 +261,10 @@ while IFS='|' read -r name _rest; do
   CONTRACT_NAMES+=("$name")
 done <<< "$CONTRACT"
 
-# F14: every root Markdown file except CLAUDE.md is an active agent and must be
+# F14: every root Markdown file except CLAUDE.md and AGENTS.md is an active agent and must be
 # represented in the contract, even if it lacks recognizable frontmatter.
 for f in ./*.md; do
-  [[ "$f" == "./CLAUDE.md" ]] && continue
+  [[ "$f" == "./CLAUDE.md" || "$f" == "./AGENTS.md" ]] && continue
   root_name="${f#./}"; root_name="${root_name%.md}"
   found=0
   for c in "${CONTRACT_NAMES[@]}"; do [[ "$c" == "$root_name" ]] && found=1 && break; done
