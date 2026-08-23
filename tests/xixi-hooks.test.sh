@@ -90,23 +90,12 @@ print(''.join(secrets.choice(alphabet) for _ in range(8)))
 PY
 }
 
-track_path() {
-  CLEANUP_PATHS+=("$1")
-}
-
-new_xixi_path() {
-  local path="/tmp/xixi-prompt-$(new_alnum_id)"
-  rm -f -- "$path" 2>/dev/null || true
-  track_path "$path"
-  printf '%s\n' "$path"
-}
-
-new_tmp_path() {
-  local prefix="$1"
-  local path="/tmp/${prefix}-$(new_alnum_id)"
-  rm -f -- "$path" 2>/dev/null || true
-  track_path "$path"
-  printf '%s\n' "$path"
+# Must not run in a command-substitution subshell — CLEANUP_PATHS lives in the parent.
+alloc_tracked() {
+  local _alloc_path="/tmp/${2}-$(new_alnum_id)"
+  rm -f -- "$_alloc_path" 2>/dev/null || true
+  CLEANUP_PATHS+=("$_alloc_path")
+  eval "$1=\"\$_alloc_path\""
 }
 
 write_payload() {
@@ -178,12 +167,16 @@ PY
 }
 
 # 1. non-xixi agent Write -> pass through
-path="$(new_xixi_path)"
+alloc_tracked path xixi-prompt
 run_hook "$HOOK_DIR/restrict-write.sh" "$(write_payload "code-reviewer" "/tmp/evil")"
 assert_rc "non-xixi Write passes through" 0
 
+# 1b. missing agent_type is treated as main-session pass-through (CONTRACT.md attribution prerequisite)
+run_hook "$HOOK_DIR/restrict-write.sh" '{"tool_input":{"file_path":"/tmp/not-sandbox"}}'
+assert_rc "missing agent_type Write passes through" 0
+
 # 2. _xixi allowed path missing -> reserve + validate inode
-path="$(new_xixi_path)"
+alloc_tracked path xixi-prompt
 run_hook "$HOOK_DIR/restrict-write.sh" "$(write_payload "_xixi" "$path")"
 assert_rc "_xixi fresh allowed path reserves successfully" 0
 assert_reserved_file "reserved file is empty regular nlink=1 owned by current uid" "$path"
@@ -193,28 +186,28 @@ run_hook "$HOOK_DIR/restrict-write.sh" "$(write_payload "_xixi" "/tmp/evil")"
 assert_rc "_xixi bad path blocks" 2
 
 # 4. _xixi pre-existing non-empty file
-path="$(new_xixi_path)"
+alloc_tracked path xixi-prompt
 printf 'attack\n' > "$path"
 run_hook "$HOOK_DIR/restrict-write.sh" "$(write_payload "_xixi" "$path")"
 assert_rc "_xixi pre-existing non-empty file blocks" 2
 
 # 5. _xixi pre-existing empty attacker file
-path="$(new_xixi_path)"
+alloc_tracked path xixi-prompt
 : > "$path"
 run_hook "$HOOK_DIR/restrict-write.sh" "$(write_payload "_xixi" "$path")"
 assert_rc "_xixi pre-existing empty file blocks" 2
 
 # 6. _xixi symlink target
-path="$(new_xixi_path)"
-target="$(new_tmp_path "xixi-symlink-target")"
+alloc_tracked path xixi-prompt
+alloc_tracked target xixi-symlink-target
 printf 'target\n' > "$target"
 ln -s "$target" "$path"
 run_hook "$HOOK_DIR/restrict-write.sh" "$(write_payload "_xixi" "$path")"
 assert_rc "_xixi symlink target blocks" 2
 
 # 7. _xixi hard-link target
-path="$(new_xixi_path)"
-attacker="$(new_tmp_path "xixi-attacker")"
+alloc_tracked path xixi-prompt
+alloc_tracked attacker xixi-attacker
 : > "$attacker"
 ln "$attacker" "$path"
 run_hook "$HOOK_DIR/restrict-write.sh" "$(write_payload "_xixi" "$path")"
@@ -229,7 +222,7 @@ BROKEN_RESTRICT_DIR="$TMPD/broken-restrict"
 mkdir -p "$BROKEN_RESTRICT_DIR"
 cp "$RESTRICT_HOOK_SRC" "$BROKEN_RESTRICT_DIR/restrict-write.sh"
 chmod +x "$BROKEN_RESTRICT_DIR/restrict-write.sh"
-path="$(new_xixi_path)"
+alloc_tracked path xixi-prompt
 run_hook "$BROKEN_RESTRICT_DIR/restrict-write.sh" "$(write_payload "_xixi" "$path")"
 assert_rc "restrict-write missing common.sh blocks" 2
 
@@ -264,7 +257,7 @@ assert_rc "copy-on-write non-xixi path shape exits 0" 0
 assert_output_empty "copy-on-write non-xixi path shape emits no status"
 
 # 12. copy-on-write success path -> ✅ + unlink + stub capture
-path="$(new_xixi_path)"
+alloc_tracked path xixi-prompt
 printf 'refined prompt body\n' > "$path"
 run_hook "$HOOK_DIR/copy-on-write.sh" "$(write_payload "_xixi" "$path")"
 assert_rc "copy-on-write success exits 0" 0
@@ -277,8 +270,8 @@ fi
 assert_file_missing "copy-on-write success unlinks temp file" "$path"
 
 # 13. copy-on-write hard-link defense -> warn + unlink xixi path
-path="$(new_xixi_path)"
-attacker="$(new_tmp_path "xixi-copy-hardlink")"
+alloc_tracked path xixi-prompt
+alloc_tracked attacker xixi-copy-hardlink
 printf 'linked prompt\n' > "$attacker"
 ln "$attacker" "$path"
 run_hook "$HOOK_DIR/copy-on-write.sh" "$(write_payload "_xixi" "$path")"

@@ -23,6 +23,10 @@ fi
 if [[ -f "${LIB_DIR}/security.sh" ]]; then
   source "${LIB_DIR}/security.sh"
 fi
+if ! declare -F hook_deny_pre >/dev/null 2>&1 || ! declare -F sec_url_extract_host >/dev/null 2>&1; then
+  echo "[bash-hook] BLOCKED: required hook libraries missing (rule:lib)." >&2
+  exit 2
+fi
 
 APPROVAL_DIR="${APPROVAL_DIR:-${HOOKS_DIR}/approvals}"
 APPROVAL_MAX_AGE_SEC=300
@@ -54,7 +58,11 @@ block() {
     fi
   fi
   audit_decision "$rule" "deny"
-  hook_deny_pre "$reason"
+  if declare -F hook_deny_pre >/dev/null 2>&1; then
+    hook_deny_pre "$reason"
+  fi
+  echo "$reason" >&2
+  exit 2
 }
 
 input=$(cat)
@@ -147,18 +155,41 @@ if sec_cmd_is_package_install "$norm"; then
   block "[bash-hook] BLOCKED: package install denied for $agent (rule:deny-install)." "deny-install"
 fi
 
+validate_config_url_literal() {
+  local config_url="$1" config_host
+  [[ -n "$config_url" ]] || return 0
+  config_host="$(sec_url_extract_host "$config_url")"
+  if [[ -z "$config_host" ]] || ! sec_is_host_safe "$config_host" "${E2E_ALLOWED_HOSTS:-}"; then
+    block "[bash-hook] BLOCKED: playwright.config baseURL not local/staging (rule:prod-guard-config)." "prod-guard-config"
+  fi
+}
+
+# Fail closed when a baseURL key exists but no http(s) host can be statically
+# resolved. Same-line literals are checked first; the following line covers
+# multiline `baseURL:\n  'https://...'` assignments. Indirect `baseURL: target`
+# with the URL on another line cannot be proven safe → block.
 validate_config_file() {
-  local cfg="$1" config_url config_host
+  local cfg="$1" config_url url_count=0
   if [[ ! -f "$cfg" ]]; then
     block "[bash-hook] BLOCKED: Playwright config file not found (rule:prod-guard-config)." "prod-guard-config-missing"
   fi
   while IFS= read -r config_url; do
     [[ -n "$config_url" ]] || continue
-    config_host="$(sec_url_extract_host "$config_url")"
-    if [[ -z "$config_host" ]] || ! sec_is_host_safe "$config_host" "${E2E_ALLOWED_HOSTS:-}"; then
-      block "[bash-hook] BLOCKED: playwright.config baseURL not local/staging (rule:prod-guard-config)." "prod-guard-config"
-    fi
+    url_count=$((url_count + 1))
+    validate_config_url_literal "$config_url"
   done < <(grep -iE 'baseURL[[:space:]]*:' "$cfg" 2>/dev/null | grep -ioE 'https?://[^[:space:]"'"'"']+' || true)
+
+  if [[ "$url_count" -eq 0 ]] && grep -qiE 'baseURL[[:space:]]*:' "$cfg" 2>/dev/null; then
+    while IFS= read -r config_url; do
+      [[ -n "$config_url" ]] || continue
+      url_count=$((url_count + 1))
+      validate_config_url_literal "$config_url"
+    done < <(awk 'tolower($0) ~ /baseurl[ \t]*:/ { want=1; next } want { print; want=0 }' "$cfg" | grep -ioE 'https?://[^[:space:]"'"'"']+' || true)
+  fi
+
+  if grep -qiE 'baseURL[[:space:]]*:' "$cfg" 2>/dev/null && [[ "$url_count" -eq 0 ]]; then
+    block "[bash-hook] BLOCKED: playwright.config baseURL cannot be resolved statically (rule:prod-guard-config)." "prod-guard-config-unresolved"
+  fi
 }
 
 allowed=0
@@ -175,18 +206,33 @@ case "$agent" in
       fi
     fi
 
-    # Validate explicit --base-url args (incl. protocol-relative //host)
+    # Validate explicit --base-url args (incl. protocol-relative //host).
+    # Flag present with no parseable host (--base-url= / bare --base-url) is a block,
+    # not a skip of the config fallback.
+    _base_url_flag=0
+    _base_url_hosts=0
+    if printf '%s' "$norm" | grep -qE -- '(^|[[:space:]])--base-url(=|[[:space:]]|$)'; then
+      _base_url_flag=1
+    fi
+    set -f
     for _b in $(printf '%s' "$norm" | grep -oE -- '--base-url=[^[:space:]]+' | cut -d= -f2- || true) \
               $(printf '%s' "$norm" | grep -oE -- '--base-url[[:space:]]+[^[:space:]]+' | sed 's/^--base-url[[:space:]]*//' || true); do
       [[ -z "$_b" ]] && continue
       _bh="$(sec_url_extract_host "$_b")"
       if [[ -z "$_bh" ]]; then
+        set +f
         block "[bash-hook] BLOCKED: --base-url has no parseable host (rule:prod-guard)." "prod-guard"
       fi
       if ! sec_is_host_safe "$_bh" "${E2E_ALLOWED_HOSTS:-}"; then
+        set +f
         block "[bash-hook] BLOCKED: --base-url host not on approved staging allowlist (rule:prod-guard)." "prod-guard"
       fi
+      _base_url_hosts=$((_base_url_hosts + 1))
     done
+    set +f
+    if [[ "$_base_url_flag" -eq 1 && "$_base_url_hosts" -eq 0 ]]; then
+      block "[bash-hook] BLOCKED: --base-url requires a parseable host (rule:prod-guard)." "prod-guard"
+    fi
 
     # Validate inline URLs
     while IFS= read -r _u; do
@@ -201,7 +247,10 @@ case "$agent" in
     done < <(printf '%s' "$norm" | grep -ioE 'https?://[^[:space:]"'"'"']+' || true)
 
     # Validate the effective config path
-    if printf '%s' "$norm" | grep -qE '^(node_modules/\.bin/playwright|playwright|npx[[:space:]]+--no-install[[:space:]]+playwright)[[:space:]]+test([[:space:]]|$)'; then
+    if printf '%s' "$norm" | grep -qE '^(node_modules/\.bin/playwright|playwright|npx[[:space:]]+--no-install[[:space:]]+playwright)[[:space:]]+(test|codegen)([[:space:]]|$)'; then
+      if [[ -z "${BASE_URL:-}" && "$_base_url_hosts" -eq 0 ]]; then
+        block "[bash-hook] BLOCKED: playwright test/codegen requires attested BASE_URL or --base-url (rule:prod-guard)." "prod-guard"
+      fi
       _config_path=""
       if [[ "$norm" =~ (^|[[:space:]])--config=([^[:space:]]+) ]]; then
         _config_path="${BASH_REMATCH[2]}"
@@ -214,12 +263,13 @@ case "$agent" in
       _config_path="${_config_path#\'}"; _config_path="${_config_path%\'}"
       if [[ -n "$_config_path" ]]; then
         validate_config_file "$_config_path"
-      elif [[ -z "${BASE_URL:-}" ]] && ! printf '%s' "$norm" | grep -qE -- '--base-url'; then
-        for cfg in playwright.config.*; do
-          [[ -f "$cfg" ]] || continue
-          validate_config_file "$cfg"
-        done
       fi
+      # BASE_URL / --base-url are extra candidate authorities, not a skip of cwd config.
+      for cfg in playwright.config.*; do
+        [[ -f "$cfg" ]] || continue
+        [[ -n "$_config_path" && "$cfg" == "$_config_path" ]] && continue
+        validate_config_file "$cfg"
+      done
     fi
 
     # Privileged commands requiring one-shot approvals

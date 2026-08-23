@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # fs.sh — Cross-platform File System Metadata and Utility Functions
 # Supports macOS (BSD stat) and Linux (GNU stat).
-set -euo pipefail
+# No `set -e`: PreToolUse exit 1 is fail-open. Callers choose errexit.
+set -uo pipefail
 
 # Get octal file mode (e.g. "600", "755")
 fs_get_mode() {

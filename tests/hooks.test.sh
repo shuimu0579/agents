@@ -9,6 +9,7 @@
 set -uo pipefail
 
 HOOK_SRC="${HOOK_SRC:-$HOME/.claude/agents/hooks/restrict-bash-by-agent.sh}"
+WRITE_HOOK_SRC="${WRITE_HOOK_SRC:-$(dirname -- "$HOOK_SRC")/restrict-mutator-write.sh}"
 SETTINGS="${SETTINGS:-$HOME/.claude/settings.json}"
 SCRIPT_DIR="$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_CONTRACT_FILE="${AGENT_CONTRACT_FILE:-$SCRIPT_DIR/fixtures/agent-contract.tsv}"
@@ -33,6 +34,19 @@ chmod +x "$BASH_HOOK"
 if [[ -d "$(dirname "$HOOK_SRC")/lib" ]]; then
   cp -R "$(dirname "$HOOK_SRC")/lib" "$TMPD/lib"
 fi
+# Isolated fleet tree so restrict-mutator-write.sh derives FLEET_ROOT from its dirname.
+FLEET_FAKE="$TMPD/fleet"
+mkdir -p "$FLEET_FAKE/hooks/approvals" "$FLEET_FAKE/tests/fixtures"
+WRITE_HOOK="$FLEET_FAKE/hooks/restrict-mutator-write.sh"
+if [[ -f "$WRITE_HOOK_SRC" ]]; then
+  cp "$WRITE_HOOK_SRC" "$WRITE_HOOK"
+  chmod +x "$WRITE_HOOK"
+fi
+if [[ -d "$TMPD/lib" ]]; then
+  cp -R "$TMPD/lib" "$FLEET_FAKE/hooks/lib"
+fi
+: > "$FLEET_FAKE/hooks/restrict-bash-by-agent.sh"
+: > "$FLEET_FAKE/tests/fixtures/agent-contract.tsv"
 HOOK_ROOT="$TMPD"
 HOOK_AUDIT_LOG="$TMPD/bash-gate.audit.log"
 
@@ -76,7 +90,7 @@ bt "unknown named agent fail-closed" "some-future-agent" "git status" 2
 # --- real-shaped PreToolUse payload + observable attribution (F1) ---
 real_payload='{"session_id":"real-shaped-session","transcript_path":"/tmp/transcript.jsonl","cwd":"/tmp/repo","permission_mode":"bypassPermissions","hook_event_name":"PreToolUse","tool_name":"Bash","agent_type":"e2e-runner","tool_input":{"command":"node_modules/.bin/playwright test"},"tool_use_id":"toolu_test"}'
 main_payload='{"session_id":"main-session","transcript_path":"/tmp/transcript.jsonl","cwd":"/tmp/repo","permission_mode":"bypassPermissions","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/main-session-probe"},"tool_use_id":"toolu_main"}'
-bt_payload "real-shaped PreToolUse payload attributes e2e-runner" "$real_payload" 0
+bt_payload "real-shaped PreToolUse payload attributes e2e-runner" "$real_payload" 0 "BASE_URL=http://localhost:3000"
 bt_payload "real-shaped main payload without agent_type passes through" "$main_payload" 0
 attribution_out="$(cd "$TEST_CWD" && printf '%s' "$main_payload" | env AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" bash "$BASH_HOOK" 2>&1)"
 attribution_rc=$?
@@ -100,9 +114,10 @@ bt "_xixi bash block ls" "_xixi" "ls" 2
 bt "e2e multi-line block" "e2e-runner" $'playwright test\npython3 /tmp/x.py' 2
 
 # --- e2e-runner: safe Playwright allowlist (F2-2) ---
-bt "e2e local playwright test allow" "e2e-runner" "playwright test" 0
-bt "e2e .bin/playwright test allow" "e2e-runner" "node_modules/.bin/playwright test" 0
-bt "e2e npx --no-install playwright test allow" "e2e-runner" "npx --no-install playwright test" 0
+bt "e2e local playwright test allow" "e2e-runner" "playwright test" 0 "BASE_URL=http://localhost:3000"
+bt "e2e .bin/playwright test allow" "e2e-runner" "node_modules/.bin/playwright test" 0 "BASE_URL=http://localhost:3000"
+bt "e2e npx --no-install playwright test allow" "e2e-runner" "npx --no-install playwright test" 0 "BASE_URL=http://localhost:3000"
+bt "e2e playwright test without attested base URL block" "e2e-runner" "playwright test" 2
 bt "e2e git status allow" "e2e-runner" "git status" 0
 bt "e2e ls allow" "e2e-runner" "ls" 0
 
@@ -138,7 +153,7 @@ bt "e2e update-snapshots block (no approval)" "e2e-runner" "playwright test --up
 : > "$TMPD/approvals/snapshots"
 chmod 600 "$TMPD/approvals/snapshots"
 bt "e2e invalid snapshot launcher cannot consume approval" "e2e-runner" "python3 /tmp/x.py playwright test --update-snapshots" 2
-bt "e2e update-snapshots allow (approval file)" "e2e-runner" "playwright test --update-snapshots" 0
+bt "e2e update-snapshots allow (approval file)" "e2e-runner" "playwright test --update-snapshots" 0 "BASE_URL=http://localhost:3000"
 : > "$TMPD/approvals/snapshots"
 chmod 600 "$TMPD/approvals/snapshots"
 touch -t 202001010000 "$TMPD/approvals/snapshots"
@@ -155,9 +170,9 @@ bt "e2e approval mode must be 600" "e2e-runner" "playwright test --update-snapsh
 : > "$TMPD/approvals/snapshots"
 chmod 600 "$TMPD/approvals/snapshots"
 race_payload=$(jq -nc '{agent_type:"e2e-runner",tool_input:{command:"playwright test --update-snapshots"}}')
-(cd "$TEST_CWD" && printf '%s' "$race_payload" | env AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" bash "$BASH_HOOK" >/dev/null 2>&1; echo $? > "$TMPD/race1") &
+(cd "$TEST_CWD" && printf '%s' "$race_payload" | env AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" BASE_URL=http://localhost:3000 bash "$BASH_HOOK" >/dev/null 2>&1; echo $? > "$TMPD/race1") &
 race_pid1=$!
-(cd "$TEST_CWD" && printf '%s' "$race_payload" | env AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" bash "$BASH_HOOK" >/dev/null 2>&1; echo $? > "$TMPD/race2") &
+(cd "$TEST_CWD" && printf '%s' "$race_payload" | env AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" BASE_URL=http://localhost:3000 bash "$BASH_HOOK" >/dev/null 2>&1; echo $? > "$TMPD/race2") &
 race_pid2=$!
 wait "$race_pid1" "$race_pid2"
 race_codes="$(sort "$TMPD/race1" "$TMPD/race2" | paste -sd, -)"
@@ -186,6 +201,38 @@ bt "e2e --config custom.conf.ts prod baseURL block" "e2e-runner" "playwright tes
 printf "%s\n" "export default { use: { baseURL: 'https://localhost.evil.com' } }" > "$TEST_CWD/substring.conf.ts"
 bt "e2e config localhost substring host block" "e2e-runner" "playwright test --config substring.conf.ts" 2
 bt "e2e uppercase HTTP scheme prod URL block" "e2e-runner" "playwright test --base-url=HTTP://prod.example.com" 2
+
+# H1: indirect / multiline baseURL must fail closed (not only same-line literals).
+# URL and baseURL key MUST be on different lines — same-line grep is the bug.
+cat > "$TEST_CWD/indirect.conf.ts" <<'EOF'
+const target = process.env.X || 'https://prod.example.com'
+export default { use: { baseURL: target } }
+EOF
+bt "e2e --config indirect baseURL assignment block" "e2e-runner" "playwright test --config indirect.conf.ts" 2
+cat > "$TEST_CWD/multiline.conf.ts" <<'EOF'
+export default {
+  use: {
+    baseURL:
+      'https://prod.example.com',
+  },
+}
+EOF
+bt "e2e --config multiline baseURL block" "e2e-runner" "playwright test --config multiline.conf.ts" 2
+printf "%s\n" "const target = process.env.BASE_URL; export default { use: { baseURL: target } }" > "$TEST_CWD/unresolved.conf.ts"
+bt "e2e --config unresolved baseURL block" "e2e-runner" "playwright test --config unresolved.conf.ts" 2
+printf "%s\n" "// see https://playwright.dev" $'\n'"export default { use: { baseURL: 'http://localhost:3000' } }" > "$TEST_CWD/local-with-comment.conf.ts"
+bt "e2e --config localhost baseURL with docs URL comment allow" "e2e-runner" "playwright test --config local-with-comment.conf.ts" 0 "BASE_URL=http://localhost:3000"
+
+# H2: --base-url present but empty / valueless must not skip host checks.
+bt "e2e empty --base-url= block" "e2e-runner" "playwright test --base-url=" 2
+bt "e2e bare --base-url flag block" "e2e-runner" "playwright test --base-url" 2
+bt "e2e IPv6 loopback --base-url allow" "e2e-runner" "playwright test --base-url=http://[::1]:3000" 0
+
+# BASE_URL / --base-url must not skip cwd playwright.config.* (code-reviewer HIGH).
+printf "%s\n" "export default { use: { baseURL: 'https://prod.example.com' } }" > "$TEST_CWD/playwright.config.ts"
+bt "e2e localhost BASE_URL with cwd prod playwright.config.ts block" "e2e-runner" "playwright test" 2 "BASE_URL=http://localhost:3000"
+bt "e2e localhost --base-url with cwd prod playwright.config.ts block" "e2e-runner" "playwright test --base-url=http://localhost:3000" 2
+rm -f "$TEST_CWD/playwright.config.ts"
 
 # --- malformed payload → fail closed (only when agent_type names a gated agent) ---
 out="$(printf '%s' '{"agent_type":"e2e-runner","tool_input":{' | env AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" bash "$BASH_HOOK" 2>&1)"
@@ -219,6 +266,69 @@ if grep -Eq '^[0-9]+ agent_type=e2e-runner rule=allowlist decision=allow$' "$HOO
   PASS=$((PASS + 1)); echo "PASS  hook audit logs timestamp, agent_type, rule, and decision"
 else
   FAIL=$((FAIL + 1)); echo "FAIL  hook audit log missing allow/deny decision lines"
+fi
+
+# --- H3: mutator Write/Edit self-protection ---
+wt() {
+  local desc="$1" agent="$2" path="$3" exp="$4" cwd="${5:-$TEST_CWD}" rc payload out
+  if [[ ! -x "$WRITE_HOOK" ]]; then
+    FAIL=$((FAIL + 1)); echo "FAIL  $desc (write hook missing)"
+    return
+  fi
+  if [[ -n "$agent" ]]; then
+    payload=$(jq -nc --arg a "$agent" --arg p "$path" --arg c "$cwd" '{agent_type:$a, cwd:$c, tool_input:{file_path:$p}}')
+  else
+    payload=$(jq -nc --arg p "$path" --arg c "$cwd" '{cwd:$c, tool_input:{file_path:$p}}')
+  fi
+  out="$(printf '%s' "$payload" | env HOOK_LIB_DIR="$FLEET_FAKE/hooks/lib" bash "$WRITE_HOOK" 2>&1)"
+  rc=$?
+  if [ "$rc" -eq "$exp" ]; then
+    PASS=$((PASS + 1)); echo "PASS  $desc"
+  else
+    FAIL=$((FAIL + 1)); echo "FAIL  $desc (exit=$rc, want=$exp) :: $(printf '%s' "$out" | head -1)"
+  fi
+}
+
+wt "e2e-runner cannot rewrite bash gate" "e2e-runner" "$FLEET_FAKE/hooks/restrict-bash-by-agent.sh" 2
+wt "e2e-runner cannot rewrite agent contract" "e2e-runner" "$FLEET_FAKE/tests/fixtures/agent-contract.tsv" 2
+wt "e2e-runner cannot rewrite live settings" "e2e-runner" "$HOME/.claude/settings.json" 2
+wt "e2e-runner cannot write approvals" "e2e-runner" "$FLEET_FAKE/hooks/approvals/with-deps" 2
+wt "e2e-runner cannot rewrite clipboard script" "e2e-runner" "$FLEET_FAKE/scripts/copy-prompt.sh" 2
+wt "e2e-runner cannot rewrite live claude hooks" "e2e-runner" "$HOME/.claude/hooks/strategic-compact/suggest-compact.sh" 2
+wt "e2e-runner cannot rewrite live claude scripts" "e2e-runner" "$HOME/.claude/scripts/otty-wrapper.sh" 2
+wt "e2e-runner cannot rewrite settings.local.json" "e2e-runner" "$HOME/.claude/settings.local.json" 2
+wt "e2e-runner relative fleet hook path blocked" "e2e-runner" "hooks/restrict-bash-by-agent.sh" 2 "$FLEET_FAKE"
+wt "e2e-runner .. into fleet hooks blocked" "e2e-runner" "../hooks/restrict-bash-by-agent.sh" 2 "$FLEET_FAKE/tests"
+if [[ "$(uname -s)" == Darwin ]]; then
+  wt "e2e-runner cannot rewrite bash gate mixed-case path" "e2e-runner" "$FLEET_FAKE/Hooks/restrict-bash-by-agent.sh" 2
+  wt "e2e-runner cannot rewrite mixed-case settings" "e2e-runner" "$HOME/.CLAUDE/settings.json" 2
+fi
+wt "main session can edit bash gate" "" "$FLEET_FAKE/hooks/restrict-bash-by-agent.sh" 0
+wt "main session cannot write approvals" "" "$FLEET_FAKE/hooks/approvals/with-deps" 2
+wt "e2e-runner can write product-repo tests" "e2e-runner" "tests/e2e/checkout.spec.ts" 0 "/tmp/other-app"
+
+payload=$(jq -nc --arg a "e2e-runner" --arg p "$FLEET_FAKE/hooks/restrict-bash-by-agent.sh" --arg c "$TEST_CWD" '{agent_type:$a, cwd:$c, tool_input:{path:$p}}')
+out="$(printf '%s' "$payload" | env HOOK_LIB_DIR="$FLEET_FAKE/hooks/lib" bash "$WRITE_HOOK" 2>&1)"
+rc=$?
+if [ "$rc" -eq 2 ]; then
+  PASS=$((PASS + 1)); echo "PASS  e2e-runner tool_input.path cannot rewrite bash gate"
+else
+  FAIL=$((FAIL + 1)); echo "FAIL  e2e-runner tool_input.path cannot rewrite bash gate (exit=$rc, want=2) :: $(printf '%s' "$out" | head -1)"
+fi
+
+if [ -f "$SETTINGS" ] && command -v python3 >/dev/null 2>&1 && python3 -c 'import json' 2>/dev/null; then
+  if python3 - "$SETTINGS" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+hooks = [h for h in d.get("hooks", {}).get("PreToolUse", []) if "Write" in h.get("matcher", "")]
+cmds = [x.get("command", "") for h in hooks for x in h.get("hooks", [])]
+sys.exit(0 if any("restrict-mutator-write.sh" in c for c in cmds) else 1)
+PY
+  then
+    PASS=$((PASS + 1)); echo "PASS  settings.json registers restrict-mutator-write hook"
+  else
+    FAIL=$((FAIL + 1)); echo "FAIL  settings.json does not register restrict-mutator-write hook"
+  fi
 fi
 
 echo

@@ -19,7 +19,7 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
       - name: Run E2E tests
-        run: npx playwright test
+        run: npx --no-install playwright test
         env:
           BASE_URL: ${{ vars.STAGING_BASE_URL }}
       - name: Upload artifacts

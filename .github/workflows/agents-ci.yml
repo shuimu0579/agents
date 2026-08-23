@@ -16,16 +16,12 @@ jobs:
       - name: Clean checkout invariant
         run: test -z "$(git status --porcelain)"
 
-      - name: Guardrails (contract + tools + Verdict, strict)
-        run: bash tests/guardrails.sh --strict
-
       - name: Hook executable + direct invocation
         run: |
           test -x hooks/restrict-bash-by-agent.sh
+          test -x hooks/restrict-mutator-write.sh
           hooks/restrict-bash-by-agent.sh </dev/null
+          hooks/restrict-mutator-write.sh </dev/null
 
-      - name: Hooks (bash gate + approvals + prod guard)
-        run: HOOK_SRC="$GITHUB_WORKSPACE/hooks/restrict-bash-by-agent.sh" SETTINGS="$GITHUB_WORKSPACE/tests/fixtures/settings.json" bash tests/hooks.test.sh
-
-      - name: Hooks (_xixi write sandbox + clipboard delivery)
-        run: RESTRICT_HOOK_SRC="$GITHUB_WORKSPACE/hooks/xixi/restrict-write.sh" COPY_HOOK_SRC="$GITHUB_WORKSPACE/hooks/xixi/copy-on-write.sh" COMMON_SRC="$GITHUB_WORKSPACE/hooks/xixi/common.sh" SETTINGS="$GITHUB_WORKSPACE/tests/fixtures/settings.json" bash tests/xixi-hooks.test.sh
+      - name: All test suites
+        run: bash tests/run_all.sh

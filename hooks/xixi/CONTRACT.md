@@ -34,6 +34,7 @@ Hardening:
 - `jq` missing OR malformed JSON naming `_xixi` / `xixi` → fail closed (`exit 2`).
 - `common.sh` missing/unreadable/missing required helpers → fail closed (`exit 2`).
 - **Residual TOCTOU:** the model Write API itself does not expose `O_NOFOLLOW`. A concurrent attacker who replaces the inode after PreToolUse but before the actual Write may still race. This hook narrows the window; it does not claim perfect kernel-enforced write sandboxing.
+- **Attribution prerequisite:** the sandbox applies only when `agent_type` is `_xixi` or `xixi`. Missing `agent_type` is treated as main-session and pass-through (same as the Bash gate). Live Write-event attribution has not been re-verified in-harness since commit `78f4c0f` (Bash-only). If a future harness omits `agent_type` on subagent Write, this gate does not constrain `_xixi`.
 
 ## PostToolUse delivery — `copy-on-write.sh`
 

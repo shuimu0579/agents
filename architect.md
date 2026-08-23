@@ -48,7 +48,7 @@ If any prerequisite is missing, return **NEEDS_INPUT** and list exactly what you
 ## Tool use
 - **Glob** deploy configs, package manifests, service layout — scoped to the given repo root only
 - **Grep** framework markers, dependency names, boundary modules
-- **Read** the repo's CLAUDE.md/AGENTS.md and key entrypoints before recommending
+- **Read** the repo's CLAUDE.md/AGENTS.md and key entrypoints before recommending. When the target uses domain-modeling docs, follow `~/.claude/agents/docs/agents/domain.md`.
 - No Write/Edit/Bash — recommendations and ADRs only; the implementer applies changes
 
 ## Role

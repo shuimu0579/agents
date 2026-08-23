@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # security.sh — Security Checks, URL Parsing, Command Sanitization, and Approval Gates
 # Sourced by fleet hooks.
-set -euo pipefail
+# No `set -e`: PreToolUse exit 1 is fail-open. Callers choose errexit.
+set -uo pipefail
+
+if ! declare -F fs_get_mode >/dev/null 2>&1; then
+  # shellcheck source=fs.sh
+  source "$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/fs.sh"
+fi
 
 # Normalize command: compact whitespace
 sec_cmd_normalize() {
@@ -96,7 +102,7 @@ sec_consume_approval() {
     return 1
   fi
 
-  mode=$(stat -f '%Lp' "$claim" 2>/dev/null || stat -c '%a' "$claim" 2>/dev/null || printf 'unknown')
+  mode=$(fs_get_mode "$claim")
   if [[ "$mode" != "600" ]]; then
     rm -f -- "$claim" 2>/dev/null || true
     return 1
@@ -107,7 +113,7 @@ sec_consume_approval() {
     return 1
   fi
 
-  mtime=$(stat -f '%m' "$claim" 2>/dev/null || stat -c '%Y' "$claim" 2>/dev/null || printf '0')
+  mtime=$(fs_get_mtime "$claim")
   age=$((now - mtime))
   if [[ "$mtime" -eq 0 || "$age" -lt 0 || "$age" -ge "$max_age_sec" ]]; then
     rm -f -- "$claim" 2>/dev/null || true

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # core.sh — Core Hook I/O, Protocol JSON Formatting, and Audit Logging
 # Sourced by fleet hooks.
-set -euo pipefail
+# No `set -e`: PreToolUse exit 1 is fail-open. Callers choose errexit.
+set -uo pipefail
 
 # Print attribution of agent_type to stderr (used by bash gate)
 hook_observe_attribution() {

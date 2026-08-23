@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # xixi.sh — Shared Path Rules and Atomic Sandbox Operations for _xixi Hooks
-set -euo pipefail
+# No `set -e`: PreToolUse exit 1 is fail-open. Callers choose errexit.
+set -uo pipefail
 
 # Returns 0 if path is allowed for _xixi Write delivery.
 xixi_is_allowed_path() {

@@ -158,7 +158,7 @@ Discover real routes/`data-testid`s from the repo — never invent a demo produc
 
 ## Production guard (non-negotiable — read before every run)
 
-Use the dispatcher-resolved baseURL from Preflight step 4. **Refuse** with `Domain status: FAILING — production target` unless the host is `localhost`, `127.0.0.1`, `::1`, `*.test`, `*.local`, or an exact orchestrator-attested host in `E2E_ALLOWED_HOSTS`. `NODE_ENV === 'production'` alone is not evidence of a safe target. Money / irreversible journeys never hit production. The Bash hook independently validates the same literal and exact host allowlist.
+Use the dispatcher-resolved baseURL from Preflight step 4. **Refuse** with `Domain status: FAILING — production target` unless the host is `localhost`, `127.0.0.1`, `::1`, `*.test`, `*.local`, or an exact orchestrator-attested host in `E2E_ALLOWED_HOSTS`. `NODE_ENV === 'production'` alone is not evidence of a safe target. Money / irreversible journeys never hit production. The Bash hook independently validates the same literal and exact host allowlist, fails closed when a config `baseURL` cannot be resolved statically, and refuses `playwright test`/`codegen` unless `BASE_URL` or `--base-url` attests a safe host.
 
 ## Config & CI templates (grill F18)
 
@@ -170,13 +170,13 @@ Do **not** embed full configs in reports. If the project already has `playwright
 ## Flaky tests & artifacts (compact)
 
 - Detect flaky: `playwright test <spec> --repeat-each=10` or `--retries=3`
-- Quarantine is **proposal-only** unless the orchestrator explicitly authorizes it and supplies an issue ID, owner, and expiry date: report `QUARANTINE` with the issue link and the proposed `test.fixme(true, 'Issue #N; expires YYYY-MM-DD')` line. Do not modify specs to suppress a failure without that authorization.
+- Quarantine is **proposal-only** unless the orchestrator explicitly authorizes it and supplies an issue ID, owner, and expiry date: report `QUARANTINE` with the issue link and the proposed `test.fixme(true, 'Issue #N; expires YYYY-MM-DD')` line. Do not modify specs to suppress a failure without that authorization. Issue-tracker and label vocabulary: `~/.claude/agents/docs/agents/issue-tracker.md`, `~/.claude/agents/docs/agents/triage-labels.md`.
 - Prefer auto-wait locators (`page.locator(...).click()`), `waitForResponse`, never fixed `waitForTimeout`
 - On failure: rely on config `trace: on-first-retry`, `screenshot: only-on-failure`, `video: retain-on-failure`; attach real artifact paths in the report
 
 ## Recovery contract (grill F19)
 
-On resume: re-run `playwright test` (or the project's e2e command) via the local binary, read CURRENT failures/flakes, and only edit specs that still fail. Do not assume prior Write/Edit landed.
+On resume: re-run `playwright test` via the local binary (`node_modules/.bin/playwright` or `npx --no-install playwright`) with the dispatcher-attested `--base-url`. Do not run `npm`/`pnpm`/`yarn` e2e scripts — the Bash gate denies them. Read CURRENT failures/flakes, and only edit specs that still fail. Do not assume prior Write/Edit landed.
 
 ## Tool-failure messages (grill F20)
 

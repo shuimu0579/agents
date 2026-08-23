@@ -33,6 +33,19 @@ run_suite() {
 
 cd "$REPO_ROOT"
 
+export HOOK_SRC="${HOOK_SRC:-$REPO_ROOT/hooks/restrict-bash-by-agent.sh}"
+export WRITE_HOOK_SRC="${WRITE_HOOK_SRC:-$REPO_ROOT/hooks/restrict-mutator-write.sh}"
+export RESTRICT_HOOK_SRC="${RESTRICT_HOOK_SRC:-$REPO_ROOT/hooks/xixi/restrict-write.sh}"
+export COPY_HOOK_SRC="${COPY_HOOK_SRC:-$REPO_ROOT/hooks/xixi/copy-on-write.sh}"
+export COMMON_SRC="${COMMON_SRC:-$REPO_ROOT/hooks/xixi/common.sh}"
+if [[ -z "${SETTINGS:-}" ]]; then
+  if [[ -f "${HOME}/.claude/settings.json" ]]; then
+    export SETTINGS="${HOME}/.claude/settings.json"
+  else
+    export SETTINGS="$REPO_ROOT/tests/fixtures/settings.json"
+  fi
+fi
+
 run_suite "Guardrails (Strict Mode)" "bash tests/guardrails.sh --strict"
 run_suite "Bash Mutator Gate Tests (hooks.test.sh)" "bash tests/hooks.test.sh"
 run_suite "Xixi Write Sandbox & Clipboard Tests (xixi-hooks.test.sh)" "bash tests/xixi-hooks.test.sh"

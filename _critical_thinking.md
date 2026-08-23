@@ -78,7 +78,7 @@ Evidence-proportioned judgment > inherited loyalty > first feeling.
 1. **Issue** — rewrite the matter as one question evidence could settle. Reject slogans.
 2. **Feeling / claim split** — name the emotion (if any), then the proposition it is being asked to justify.
 3. **Individuality / inheritance** — treat the first reaction as tentative; ask why it arose; name other possible reactions; then choose after setting conditioning from family, peers, media, tribe, era, or brand aside.
-4. **Grade the support** — label each reason `known` (public, checkable) / `probable` (partial) / `assumed` (no evidence) / `unknown`. Do not upgrade a grade without new evidence.
+4. **Grade the support** — label each reason `known` (public, checkable) / `probable` (partial) / `assumed` (no evidence) / `guessed` / `unknown`. Do not upgrade a grade without new evidence.
 5. **Charity** — state the strongest competent contrary case in its own terms. If you cannot, inquiry is incomplete.
 6. **Error scan** — run the four families below. A load-bearing error defeats the case.
 7. **Earned judgment** — only after 1–6. Match confidence to the evidence grade. State the revision condition.
@@ -95,7 +95,7 @@ Apply by id. Each line is a check, not a slogan.
 | P2 | Treat the first reaction as tentative; ask why it arose; name other possible reactions; pick after setting conditioning aside. |
 | P3 | Define the issue as a question, not a team jersey. |
 | P4 | Label each supporting sentence fact / interpretation / preference-or-judgment. A preference may not ride as a public judgment. |
-| P5 | Grade knowing (known / probable / assumed / unknown). Familiarity is not knowledge. |
+| P5 | Grade knowing (known / probable / assumed / guessed / unknown). Familiarity is not knowledge. |
 | P6 | Weigh opinions by the inquiry behind them, not by who owns them. |
 | P7 | Hunt mine-is-better. If the case collapses after you swap tribes, authors, or brands, identity was doing the work. |
 | P8 | Survey aspects. One narrow frame is an error, not a focus. |

@@ -1,10 +1,10 @@
 # Codex Agent Fleet (Codex — 6 agents)
 
-A lean repository of Codex sub-agent definitions. Lives at `~/.Codex/agents/` and is tracked at `github.com/shuimu0579/agents`.
+A lean repository of Codex sub-agent definitions. Git checkout lives at `~/.claude/agents/` (same tree Claude Code loads) and is tracked at `github.com/shuimu0579/agents`. Codex CLI consumes a generated `~/.codex/agents/*.toml` mirror of these `.md` files — there is no separate `~/.Codex/` checkout.
 
 ## Prerequisites
 
-- Codex (CLI that loads agents from `~/.Codex/agents/`)
+- Codex (CLI that loads the generated `~/.codex/agents/*.toml` mirror of this repo)
 - Bash (for tests)
 - Optional: Playwright when using the `e2e-runner` templates
 
@@ -45,16 +45,16 @@ agents/
 ├── _critical_thinking.md      # Critical thinking guide (Beyond Feelings)
 ├── archive/                   # Retired agents + retired scripts (see above)
 ├── docs/                      # Domain docs + audit reports (docs/audits/)
+│   ├── agents/                # domain.md, issue-tracker.md, security-checklists.md, triage-labels.md
 │   └── critical-thinking/     # Distilled Beyond Feelings principles
 ├── AGENTS.md                  # This file
-├── hooks/                     # Agent hooks (approvals, bash gate, xixi sandbox)
+├── hooks/                     # Agent hooks (approvals, bash gate, write self-protect, xixi sandbox)
 │   ├── lib/                   # Shared modular libraries (core, fs, security, xixi)
 │   ├── approvals/             # One-shot approval files
 │   └── xixi/                  # _xixi Write sandbox & clipboard hooks
-├── scripts/                   # Verification + clipboard helper scripts
+├── scripts/                   # Clipboard helper scripts
 ├── templates/                 # Playwright + CI templates
 └── tests/                     # Guardrails + hook tests
-    ├── lib/                   # Shared test assertions & sandbox harness
     └── run_all.sh             # Unified test suite runner
 ```
 
@@ -97,7 +97,7 @@ Do not commit *Beyond Feelings* (or any copyrighted book) into this repo. Distil
 
 ## Run
 
-There is no build or compile step. Agents auto-load when this directory is `~/.Codex/agents/` or is symlinked there. Verify changes with the commands under Testing & CI.
+There is no build or compile step. Claude Code auto-loads `*.md` from `~/.claude/agents/`. Codex loads the generated `~/.codex/agents/*.toml` mirror. Verify changes with the commands under Testing & CI.
 
 ## Testing & CI
 
@@ -122,5 +122,5 @@ bash tests/hook-e2e.test.sh
 
 1. Create `<name>.md` with valid frontmatter.
 2. Add the matching row to `tests/fixtures/agent-contract.tsv`; guardrails and the Bash hook share this file.
-3. Add a row to the agent directory in `~/.Codex/rules/agents.md`.
-4. Run `bash tests/guardrails.sh --strict`, `bash tests/hooks.test.sh`, and `bash tests/xixi-hooks.test.sh` — all must pass.
+3. Add a row to the agent directory in `~/.claude/rules/agents.md`.
+4. Run `bash tests/run_all.sh` — all must pass.
