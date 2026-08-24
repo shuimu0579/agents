@@ -233,10 +233,12 @@ bt "e2e localhost BASE_URL with cwd prod playwright.config.ts block" "e2e-runner
 bt "e2e localhost --base-url with cwd prod playwright.config.ts block" "e2e-runner" "playwright test --base-url=http://localhost:3000" 2
 rm -f "$TEST_CWD/playwright.config.ts"
 
-# codegen output redirection blocking + quoted base-url support
-bt "e2e codegen --output block" "e2e-runner" "playwright codegen --output=hooks/restrict-bash-by-agent.sh http://localhost:3000" 2
-bt "e2e codegen -o block" "e2e-runner" "playwright codegen -o hooks/restrict-bash-by-agent.sh http://localhost:3000" 2
-bt "e2e codegen quoted option block" "e2e-runner" 'playwright codegen --out"put"=hooks/restrict-bash-by-agent.sh http://localhost:3000' 2
+# codegen output redirection blocking + quoted/escaped flag support
+bt "e2e codegen --output block" "e2e-runner" "playwright codegen --output=hooks/restrict-bash-by-agent.sh http://localhost:3000" 2 "BASE_URL=http://localhost:3000"
+bt "e2e codegen -o block" "e2e-runner" "playwright codegen -o hooks/restrict-bash-by-agent.sh http://localhost:3000" 2 "BASE_URL=http://localhost:3000"
+bt "e2e codegen quoted option block" "e2e-runner" 'playwright codegen --out"put"=hooks/restrict-bash-by-agent.sh http://localhost:3000' 2 "BASE_URL=http://localhost:3000"
+bt "e2e codegen backslash-escaped option block" "e2e-runner" 'playwright codegen --out\put=hooks/restrict-bash-by-agent.sh http://localhost:3000' 2 "BASE_URL=http://localhost:3000"
+bt "e2e codegen allow without output option" "e2e-runner" "playwright codegen http://localhost:3000" 0 "BASE_URL=http://localhost:3000"
 bt "e2e double-quoted base-url allow" "e2e-runner" 'playwright test --base-url="http://localhost:3000"' 0
 bt "e2e single-quoted base-url allow" "e2e-runner" "playwright test --base-url='http://localhost:3000'" 0
 
