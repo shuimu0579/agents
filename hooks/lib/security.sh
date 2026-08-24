@@ -12,7 +12,7 @@ fi
 # Normalize command: compact whitespace
 sec_cmd_normalize() {
   local cmd="$1"
-  printf '%s' "$cmd" | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/[[:space:]]\+/ /g'
+  printf '%s' "$cmd" | tr '\n' ' ' | sed -E 's/^[[:space:]]+//;s/[[:space:]]+$//;s/[[:space:]]+/ /g'
 }
 
 # Check if normalized command contains forbidden shell operators or substitutions

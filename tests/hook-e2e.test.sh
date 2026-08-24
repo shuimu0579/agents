@@ -8,8 +8,9 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-HOOK="${HOOK_PATH:-$REPO_ROOT/hooks/restrict-bash-by-agent.sh}"
+HOOK="${HOOK_PATH:-${HOOK_SRC:-$REPO_ROOT/hooks/restrict-bash-by-agent.sh}}"
 SETTINGS="${SETTINGS:-$HOME/.claude/settings.json}"
+AGENT_CONTRACT_FILE="${AGENT_CONTRACT_FILE:-$SCRIPT_DIR/fixtures/agent-contract.tsv}"
 
 PASS=0
 FAIL=0
@@ -56,7 +57,7 @@ else
   fail "restrict-bash-by-agent.sh is not a command hook under PreToolUse matcher Bash in $SETTINGS"
 fi
 
-WRITE_HOOK="${WRITE_HOOK_PATH:-$REPO_ROOT/hooks/restrict-mutator-write.sh}"
+WRITE_HOOK="${WRITE_HOOK_PATH:-${WRITE_HOOK_SRC:-$REPO_ROOT/hooks/restrict-mutator-write.sh}}"
 if [[ -x "$HOOK" ]]; then
   pass "hook is executable: $HOOK"
 else
@@ -102,7 +103,7 @@ run_case() {
     fail "$desc (hook is not executable)"
     return
   fi
-  output="$(cd "$SAFE_CWD" && printf '%s' "$payload" | env BASE_URL=http://localhost:3000 HOME="$TMP_HOME" APPROVAL_DIR="$APPROVAL_DIR" HOOK_AUDIT_LOG="$AUDIT_LOG" "$HOOK" 2>&1)"
+  output="$(cd "$SAFE_CWD" && printf '%s' "$payload" | env BASE_URL=http://localhost:3000 HOME="$TMP_HOME" APPROVAL_DIR="$APPROVAL_DIR" AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$AUDIT_LOG" "$HOOK" 2>&1)"
   rc=$?
   if [[ "$rc" -eq "$expected" ]]; then
     pass "$desc"
@@ -124,7 +125,7 @@ run_case "full payload: newline-containing command exits 2" "$newline_payload" 2
 run_case "main-session payload: absent agent_type passes through" "$main_payload" 0
 
 # Attribution is always observable, while the audit log records no command body.
-attribution_output="$(cd "$SAFE_CWD" && printf '%s' "$main_payload" | env BASE_URL=http://localhost:3000 HOME="$TMP_HOME" APPROVAL_DIR="$APPROVAL_DIR" HOOK_AUDIT_LOG="$AUDIT_LOG" "$HOOK" 2>&1)"
+attribution_output="$(cd "$SAFE_CWD" && printf '%s' "$main_payload" | env BASE_URL=http://localhost:3000 HOME="$TMP_HOME" APPROVAL_DIR="$APPROVAL_DIR" AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$AUDIT_LOG" "$HOOK" 2>&1)"
 attribution_rc=$?
 if [[ "$attribution_rc" -eq 0 ]] && printf '%s' "$attribution_output" | grep -qF 'agent_type=<absent>'; then
   pass "missing agent_type is observable without constraining main-session Bash"
@@ -139,7 +140,7 @@ else
   fail "audit log content mismatch"
 fi
 
-fail_open_output="$(cd "$SAFE_CWD" && printf '%s' "$allowed_payload" | env BASE_URL=http://localhost:3000 HOME="$TMP_HOME" APPROVAL_DIR="$APPROVAL_DIR" HOOK_AUDIT_LOG="$TMP_ROOT/missing/audit.log" "$HOOK" 2>&1)"
+fail_open_output="$(cd "$SAFE_CWD" && printf '%s' "$allowed_payload" | env BASE_URL=http://localhost:3000 HOME="$TMP_HOME" APPROVAL_DIR="$APPROVAL_DIR" AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$TMP_ROOT/missing/audit.log" "$HOOK" 2>&1)"
 fail_open_rc=$?
 if [[ "$fail_open_rc" -eq 0 ]]; then
   pass "audit write failure does not change an allow decision"

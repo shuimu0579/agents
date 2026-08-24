@@ -34,10 +34,13 @@ run_suite() {
 cd "$REPO_ROOT"
 
 export HOOK_SRC="${HOOK_SRC:-$REPO_ROOT/hooks/restrict-bash-by-agent.sh}"
+export HOOK_PATH="${HOOK_PATH:-$HOOK_SRC}"
 export WRITE_HOOK_SRC="${WRITE_HOOK_SRC:-$REPO_ROOT/hooks/restrict-mutator-write.sh}"
+export WRITE_HOOK_PATH="${WRITE_HOOK_PATH:-$WRITE_HOOK_SRC}"
 export RESTRICT_HOOK_SRC="${RESTRICT_HOOK_SRC:-$REPO_ROOT/hooks/xixi/restrict-write.sh}"
 export COPY_HOOK_SRC="${COPY_HOOK_SRC:-$REPO_ROOT/hooks/xixi/copy-on-write.sh}"
 export COMMON_SRC="${COMMON_SRC:-$REPO_ROOT/hooks/xixi/common.sh}"
+export AGENT_CONTRACT_FILE="${AGENT_CONTRACT_FILE:-$REPO_ROOT/tests/fixtures/agent-contract.tsv}"
 if [[ -z "${SETTINGS:-}" ]]; then
   if [[ -f "${HOME}/.claude/settings.json" ]]; then
     export SETTINGS="${HOME}/.claude/settings.json"
