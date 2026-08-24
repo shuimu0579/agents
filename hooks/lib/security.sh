@@ -18,7 +18,7 @@ sec_cmd_normalize() {
 # Check if normalized command contains forbidden shell operators or substitutions
 sec_cmd_has_shell_meta() {
   local norm="$1"
-  if printf '%s' "$norm" | grep -qE '[;&|<>`$(){}]|&&|\|\||\$\(|`|\n|\r'; then
+  if printf '%s' "$norm" | grep -qE '[;&|<>`$(){}]'; then
     return 0
   fi
   if printf '%s' "$norm" | grep -qE '\\;|\\\||\\&'; then
