@@ -228,11 +228,17 @@ bt "e2e empty --base-url= block" "e2e-runner" "playwright test --base-url=" 2
 bt "e2e bare --base-url flag block" "e2e-runner" "playwright test --base-url" 2
 bt "e2e IPv6 loopback --base-url allow" "e2e-runner" "playwright test --base-url=http://[::1]:3000" 0
 
-# BASE_URL / --base-url must not skip cwd playwright.config.* (code-reviewer HIGH).
 printf "%s\n" "export default { use: { baseURL: 'https://prod.example.com' } }" > "$TEST_CWD/playwright.config.ts"
 bt "e2e localhost BASE_URL with cwd prod playwright.config.ts block" "e2e-runner" "playwright test" 2 "BASE_URL=http://localhost:3000"
 bt "e2e localhost --base-url with cwd prod playwright.config.ts block" "e2e-runner" "playwright test --base-url=http://localhost:3000" 2
 rm -f "$TEST_CWD/playwright.config.ts"
+
+# codegen output redirection blocking + quoted base-url support
+bt "e2e codegen --output block" "e2e-runner" "playwright codegen --output=hooks/restrict-bash-by-agent.sh http://localhost:3000" 2
+bt "e2e codegen -o block" "e2e-runner" "playwright codegen -o hooks/restrict-bash-by-agent.sh http://localhost:3000" 2
+bt "e2e codegen quoted option block" "e2e-runner" 'playwright codegen --out"put"=hooks/restrict-bash-by-agent.sh http://localhost:3000' 2
+bt "e2e double-quoted base-url allow" "e2e-runner" 'playwright test --base-url="http://localhost:3000"' 0
+bt "e2e single-quoted base-url allow" "e2e-runner" "playwright test --base-url='http://localhost:3000'" 0
 
 # --- malformed payload → fail closed (only when agent_type names a gated agent) ---
 out="$(printf '%s' '{"agent_type":"e2e-runner","tool_input":{' | env AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" bash "$BASH_HOOK" 2>&1)"
@@ -294,6 +300,7 @@ wt "e2e-runner cannot rewrite agent contract" "e2e-runner" "$FLEET_FAKE/tests/fi
 wt "e2e-runner cannot rewrite live settings" "e2e-runner" "$HOME/.claude/settings.json" 2
 wt "e2e-runner cannot write approvals" "e2e-runner" "$FLEET_FAKE/hooks/approvals/with-deps" 2
 wt "e2e-runner cannot rewrite clipboard script" "e2e-runner" "$FLEET_FAKE/scripts/copy-prompt.sh" 2
+wt "e2e-runner cannot rewrite agent prompt file" "e2e-runner" "$FLEET_FAKE/architect.md" 2
 wt "e2e-runner cannot rewrite live claude hooks" "e2e-runner" "$HOME/.claude/hooks/strategic-compact/suggest-compact.sh" 2
 wt "e2e-runner cannot rewrite live claude scripts" "e2e-runner" "$HOME/.claude/scripts/otty-wrapper.sh" 2
 wt "e2e-runner cannot rewrite settings.local.json" "e2e-runner" "$HOME/.claude/settings.local.json" 2

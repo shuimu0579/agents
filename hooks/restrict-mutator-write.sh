@@ -128,6 +128,11 @@ is_protected() {
     */hooks/approvals|*/hooks/approvals/*) return 0 ;;
   esac
   if [[ -n "$agent" ]]; then
+    local fleet_root_cf="$FLEET_ROOT"
+    [[ "$(uname -s)" == Darwin ]] && fleet_root_cf=$(printf '%s' "$FLEET_ROOT" | tr '[:upper:]' '[:lower:]')
+    case "$p_cf" in
+      "${fleet_root_cf}/"*.md) return 0 ;;
+    esac
     path_matches "$p" "$hooks_prefix" && return 0
     path_matches "$p" "$tests_prefix" && return 0
     path_matches "$p" "$scripts_prefix" && return 0

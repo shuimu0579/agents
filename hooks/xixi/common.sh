@@ -16,6 +16,11 @@ if [[ -f "${LIB_DIR}/xixi.sh" ]]; then
   source "${LIB_DIR}/xixi.sh"
 fi
 
+if ! declare -F xixi_is_allowed_path >/dev/null 2>&1; then
+  echo "[xixi-hook] BLOCKED: required xixi.sh library missing" >&2
+  return 1 2>/dev/null || exit 2
+fi
+
 is_allowed_xixi_path() {
   xixi_is_allowed_path "$@"
 }

@@ -218,6 +218,8 @@ case "$agent" in
     for _b in $(printf '%s' "$norm" | grep -oE -- '--base-url=[^[:space:]]+' | cut -d= -f2- || true) \
               $(printf '%s' "$norm" | grep -oE -- '--base-url[[:space:]]+[^[:space:]]+' | sed 's/^--base-url[[:space:]]*//' || true); do
       [[ -z "$_b" ]] && continue
+      _b="${_b#\"}"; _b="${_b%\"}"
+      _b="${_b#\'}"; _b="${_b%\'}"
       _bh="$(sec_url_extract_host "$_b")"
       if [[ -z "$_bh" ]]; then
         set +f
@@ -294,8 +296,13 @@ case "$agent" in
     # Safe local Playwright invocations + read-only git/ls/which
     elif printf '%s' "$norm" | grep -qiE \
       '^(node_modules/\.bin/playwright|playwright|npx[[:space:]]+--no-install[[:space:]]+playwright)[[:space:]]+(test|show-report|codegen)([[:space:]]|$)|^git[[:space:]]+(status|diff|log|show)([[:space:]]|$)|^ls([[:space:]]|$)|^which([[:space:]]|$)|^command[[:space:]]+-v([[:space:]]|$)'; then
-      if printf '%s' "$norm" | grep -qiE '^git[[:space:]]+(diff|show|log)[[:space:]].*--output='; then
+      local norm_clean
+      norm_clean="$(printf '%s' "$norm" | tr -d '"'"'")"
+      if printf '%s' "$norm_clean" | grep -qiE '^git[[:space:]]+(diff|show|log)[[:space:]].*--output='; then
         block "[bash-hook] BLOCKED: writable git option --output= denied for $agent (rule:deny-git-output)." "deny-git-output"
+      fi
+      if printf '%s' "$norm_clean" | grep -qiE 'playwright[[:space:]]+codegen([[:space:]].*)?(--output(=|[[:space:]])|-o([[:space:]]|=))'; then
+        block "[bash-hook] BLOCKED: writable playwright codegen option --output/-o denied for $agent (rule:deny-codegen-output)." "deny-codegen-output"
       fi
       allowed=1
     fi
