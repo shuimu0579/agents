@@ -108,7 +108,7 @@ run_case() {
   if [[ "$rc" -eq "$expected" ]]; then
     pass "$desc"
   else
-    fail "$desc (exit=$rc, want=$expected; first output: $(printf '%s' "$output" | head -n 1))"
+    fail "$desc (exit=$rc, want=$expected; output: $(printf '%s' "$output" | tr '\n' ' | '))"
   fi
 }
 

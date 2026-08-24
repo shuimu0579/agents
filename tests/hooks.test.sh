@@ -65,7 +65,7 @@ bt() {
   if [ "$rc" -eq "$exp" ]; then
     PASS=$((PASS + 1)); echo "PASS  $desc"
   else
-    FAIL=$((FAIL + 1)); echo "FAIL  $desc (exit=$rc, want=$exp) :: $(printf '%s' "$out" | head -1)"
+    FAIL=$((FAIL + 1)); echo "FAIL  $desc (exit=$rc, want=$exp) :: $(printf '%s' "$out" | tr '\n' ' | ')"
   fi
 }
 
@@ -78,7 +78,7 @@ bt_payload() {
   if [ "$rc" -eq "$exp" ]; then
     PASS=$((PASS + 1)); echo "PASS  $desc"
   else
-    FAIL=$((FAIL + 1)); echo "FAIL  $desc (exit=$rc, want=$exp) :: $(printf '%s' "$out" | head -1)"
+    FAIL=$((FAIL + 1)); echo "FAIL  $desc (exit=$rc, want=$exp) :: $(printf '%s' "$out" | tr '\n' ' | ')"
   fi
 }
 
