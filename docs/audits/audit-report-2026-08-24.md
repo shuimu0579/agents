@@ -16,10 +16,10 @@ scope: Full Repository & System Integration
 - **测试结果**: 执行 `bash tests/run_all.sh`，4/4 suites (143+ 测试用例) **100% PASS**。
 - **问题修复统计**:
   - **Critical**: 1/1 Fixed
-  - **High**: 4/4 Fixed
+  - **High**: 5/5 Fixed
   - **Medium**: 3/3 Fixed / Handled
   - **Low**: 4/4 Fixed / Handled
-  - **Total**: 12/12 Fixed & Verified
+  - **Total**: 13/13 Fixed & Verified
 
 ---
 
@@ -39,6 +39,7 @@ scope: Full Repository & System Integration
 | **F-10** | `tests/run_all.sh` & `tests/hook-e2e.test.sh` | **Low** | Testing / Environment | `run_all.sh` 导出的 `HOOK_SRC` 与 `hook-e2e.test.sh` 变量名 `HOOK_PATH` 不一致，且子 shell 中缺少显式 `AGENT_CONTRACT_FILE` 传递。 | **Fixed**: 对齐测试环境变量定义并完整注入子 shell。 |
 | **F-11** | `archive/` 目录历史归档 | **Low** | Dead Code | 存放了 6 个已弃用 Agent 的 `.disabled` 模板及废弃脚本，不参与任何测试与执行。 | **Handled**: 保持现有 `.disabled` 扩展名隔离，确保安全不被加载。 |
 | **F-12** | `templates/playwright.config.ts.tmpl:31` | **Low** | Dependencies | 模板中移动端设备预设仍使用 `Pixel 5`，在最新版 Playwright 中建议升级为主流测试机型。 | **Fixed**: 更新模板中的设备配置为 `devices['Pixel 7']`。 |
+| **F-13** | `hooks/lib/security.sh:18-28` | **High** | Logic / Cross-Platform | `sec_cmd_has_shell_meta` 在 `grep -E` 中包含 `\n\|\r`，在 GNU grep (Linux) 下被解析为匹配字面字母 `n` 与 `r`，导致所有含 `n` 或 `r` 的合法命令（如 `playwright`、`node`）均被误判为包含 Shell 危险元字符而拦截。 | **Fixed**: 移除 `grep -E` 中的 `\n\|\r`（换行拦截已由前置 `cmd == *$'\n'*` 严格把关），保留确切的元字符集合 `[;&\|<>`$(){}]`。 |
 
 ---
 
