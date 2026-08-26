@@ -131,3 +131,18 @@ bash tests/hook-e2e.test.sh
 - Before changing structure, dependencies, interfaces, or persistence: read `adr/`.
 - Record those choices as MADR ADRs (`NNNN-title-with-dashes.md`). One question per file.
 - To change course, write a new ADR that supersedes the old one; do not rewrite the old Decision Outcome.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub issues tracked via `gh` CLI (`shuimu0579/agents`). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical roles mapped 1:1 (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context repository layout (`CONTEXT.md` + `adr/`). See `docs/agents/domain.md`.
+
