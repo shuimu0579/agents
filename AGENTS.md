@@ -124,3 +124,9 @@ bash tests/hook-e2e.test.sh
 2. Add the matching row to `tests/fixtures/agent-contract.tsv`; guardrails and the Bash hook share this file.
 3. Add a row to the agent directory in `~/.claude/rules/agents.md`.
 4. Run `bash tests/run_all.sh` — all must pass.
+
+## Architecture Decision Records
+
+- Before changing structure, dependencies, interfaces, or persistence: read `adr/`.
+- Record those choices as MADR ADRs (`NNNN-title-with-dashes.md`). One question per file.
+- To change course, write a new ADR that supersedes the old one; do not rewrite the old Decision Outcome.
