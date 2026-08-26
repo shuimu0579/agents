@@ -43,6 +43,7 @@ agents/
 ├── e2e-runner.md              # Playwright E2E test automation
 ├── _xixi.md                   # Prompt refinement + clipboard delivery
 ├── _critical_thinking.md      # Critical thinking guide (Beyond Feelings)
+├── adr/                       # MADR architecture decision records
 ├── archive/                   # Retired agents + retired scripts (see above)
 ├── docs/                      # Domain docs + audit reports (docs/audits/)
 │   ├── agents/                # domain.md, issue-tracker.md, security-checklists.md, triage-labels.md
