@@ -93,7 +93,7 @@ For controls that static review **cannot establish** (HTTPS enforcement, encrypt
 
 ## Output Format (required)
 
-Severity scale, canonical `Verdict`, and report skeleton follow `~/.claude/rules/agent-output-contract.md`. Same severity tags as code-reviewer.
+Severity scale, canonical `Verdict`, and report skeleton follow `~/.claude/agents/docs/agent-output-contract.md`. Same severity tags as code-reviewer.
 
 ```markdown
 # Security Review Report

@@ -139,7 +139,7 @@ Report only errors that actually carry the case. Do not invent a full set.
 
 ## Verdict rules
 
-Domain status → canonical Verdict (`~/.claude/rules/agent-output-contract.md`):
+Domain status → canonical Verdict (`~/.claude/agents/docs/agent-output-contract.md`):
 
 - **SOUND** → `GO` — only if inquiry is complete, no defeating error remains, and (P15) the case is certain or clearly more probable than every rival. Zero errors is necessary, not sufficient.
 - **INCOMPLETE** → `NEEDS_INPUT` — a definition, gradeable reason, or competent contrary case is missing; the user sent only a mood; inquiry finished with the evidence in equipoise (P15 withhold); or a distill excerpt is too thin.

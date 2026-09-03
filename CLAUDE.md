@@ -2,23 +2,6 @@
 
 A lean repository of Claude Code sub-agent definitions. Lives at `~/.claude/agents/` and is tracked at `github.com/shuimu0579/agents`.
 
-## Prerequisites
-
-- Claude Code (CLI that loads agents from `~/.claude/agents/`)
-- Bash (for tests)
-- Optional: Playwright when using the `e2e-runner` templates
-
-## Active Agents
-
-| Agent | Role | Tools | Model |
-|-------|------|-------|-------|
-| `architect` | System design, trade-off analysis | Read, Grep, Glob | opus |
-| `code-reviewer` | Code quality review | Read, Grep, Glob | sonnet |
-| `security-reviewer` | Security vulnerability review | Read, Grep, Glob | sonnet |
-| `e2e-runner` | Playwright E2E test automation | Read, Write, Edit, Bash, Grep, Glob | sonnet |
-| `_xixi` | LLM prompt refinement + clipboard delivery | Read, Grep, Glob, Write | sonnet |
-| `_critical_thinking` | Critical thinking guide (Beyond Feelings) | Read, Grep, Glob | sonnet |
-
 ## Archived (2026-08-09 — Codex fleet consolidation)
 
 The following agents were retired per Codex+Grok audit recommendation D1. Moved to `archive/`:
@@ -32,32 +15,6 @@ The following agents were retired per Codex+Grok audit recommendation D1. Moved 
 | `doc-updater` | Doc sync is the last step of a task, requires main-session context |
 
 `_xixi` was briefly archived in that consolidation, then **restored as an active agent** (prompt refinement + sandboxed Write + clipboard hooks remain fleet infrastructure).
-
-## Repository Structure
-
-```
-agents/
-├── architect.md              # System design & trade-off analysis
-├── code-reviewer.md           # Code quality review
-├── security-reviewer.md       # Security vulnerability review
-├── e2e-runner.md              # Playwright E2E test automation
-├── _xixi.md                   # Prompt refinement + clipboard delivery
-├── _critical_thinking.md      # Critical thinking guide (Beyond Feelings)
-├── adr/                       # MADR architecture decision records
-├── archive/                   # Retired agents + retired scripts (see above)
-├── docs/                      # Domain docs + audit reports (docs/audits/)
-│   ├── agents/                # domain.md, issue-tracker.md, security-checklists.md, triage-labels.md
-│   └── critical-thinking/     # Distilled Beyond Feelings principles
-├── CLAUDE.md                  # This file
-├── hooks/                     # Agent hooks (approvals, bash gate, write self-protect, xixi sandbox)
-│   ├── lib/                   # Shared modular libraries (core, fs, security, xixi)
-│   ├── approvals/             # One-shot approval files
-│   └── xixi/                  # _xixi Write sandbox & clipboard hooks
-├── scripts/                   # Clipboard helper scripts
-├── templates/                 # Playwright + CI templates
-└── tests/                     # Guardrails + hook tests
-    └── run_all.sh             # Unified test suite runner
-```
 
 ## Agent Definition Contract
 

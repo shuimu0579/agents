@@ -188,7 +188,7 @@ No journeys and no requested new coverage → `Domain status: PASSING` **only wh
 
 ## Output Format (required)
 
-Every session ends with this report (after create/run/maintain work). Canonical Verdict: `~/.claude/rules/agent-output-contract.md` (grill F14). Map PASSING→GO · QUARANTINE→NEEDS_INPUT (flaky, explicit accept) · FAILING→BLOCK.
+Every session ends with this report (after create/run/maintain work). Canonical Verdict: `~/.claude/agents/docs/agent-output-contract.md` (grill F14). Map PASSING→GO · QUARANTINE→NEEDS_INPUT (flaky, explicit accept) · FAILING→BLOCK.
 
 ```markdown
 # E2E Session Report

@@ -116,7 +116,7 @@ For every line: **"If I delete this, does the AI's output get worse?"** If no, d
 
 ## Output Format
 
-Canonical Verdict for orchestrators: `~/.claude/rules/agent-output-contract.md` (grill F14). Map clipboard `✅` → GO · `⚠️`/fallback paste → NEEDS_INPUT.
+Canonical Verdict for orchestrators: `~/.claude/agents/docs/agent-output-contract.md` (grill F14). Map clipboard `✅` → GO · `⚠️`/fallback paste → NEEDS_INPUT.
 
 Domain status tokens (exact; map to Verdict):
 

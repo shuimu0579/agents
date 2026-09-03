@@ -126,7 +126,7 @@ Size and complexity thresholds are review signals, not blocking limits. They pro
 
 ## Output Format (required)
 
-Severity scale, canonical `Verdict`, and report skeleton follow `~/.claude/rules/agent-output-contract.md` (grill F14/F16).
+Severity scale, canonical `Verdict`, and report skeleton follow `~/.claude/agents/docs/agent-output-contract.md` (grill F14/F16).
 
 ```markdown
 # Code Review Report

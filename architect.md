@@ -114,7 +114,7 @@ YYYY-MM-DD
 
 ## Output Format (required)
 
-Severity / Verdict vocabulary follow `~/.claude/rules/agent-output-contract.md`.
+Severity / Verdict vocabulary follow `~/.claude/agents/docs/agent-output-contract.md`.
 
 ```markdown
 # Architecture Review: [Topic]

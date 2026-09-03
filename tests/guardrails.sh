@@ -28,7 +28,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENTS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 AGENT_CONTRACT_FILE="$SCRIPT_DIR/fixtures/agent-contract.tsv"
 OUTPUT_CONTRACT_FIXTURE="$SCRIPT_DIR/fixtures/output-contract.md"
-LIVE_OUTPUT_CONTRACT="${OUTPUT_CONTRACT:-$HOME/.claude/rules/agent-output-contract.md}"
+LIVE_OUTPUT_CONTRACT="${OUTPUT_CONTRACT:-$HOME/.claude/agents/docs/agent-output-contract.md}"
 STRICT=0
 for arg in "$@"; do [[ "$arg" == "--strict" ]] && STRICT=1; done
 
@@ -194,7 +194,7 @@ while IFS='|' read -r name exp_tools exp_model domain_statuses flag; do
   if token_present "$f" "**Verdict:**"; then
     note "$f: canonical Verdict line present"
   else
-    fail "$f: missing canonical **Verdict:** (bold, GO|BLOCK|NEEDS_INPUT) — see rules/agent-output-contract.md"
+    fail "$f: missing canonical **Verdict:** (bold, GO|BLOCK|NEEDS_INPUT) — see docs/agent-output-contract.md"
   fi
 
   # 4b2. Verdict must be the final template line, after ## Handoff (contract: final line) — D-TOKEN freeze
