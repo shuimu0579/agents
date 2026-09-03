@@ -64,11 +64,13 @@ This agent is **review-only** (no Write/Edit, **no Bash**). The orchestrator pro
 
 **Evidence unavailable to this tool set:** the dispatcher must provide current test/coverage output and dependency vulnerability/license results when those facts affect approval. Without that evidence, mark each claim **NOT VERIFIED**; never infer coverage, passing tests, dependency safety, or license compatibility from source files alone. A material NOT VERIFIED item makes the verdict `NEEDS_INPUT`.
 
+**Glob:** discover sibling files, related test suites (`*.test.*`, `*.spec.*`), or configurations when verifying test coverage or scope context around modified files.
+
 **Grep:** search the change set for secrets, `console.log`, TODO without tickets, mutation smells.
 
 When invoked:
 1. Discover scope: use the paths/diff the orchestrator provides (you have no Bash to run git yourself)
-2. Focus on modified files via Read/Grep
+2. Focus on modified files via Read/Grep, and locate related test files or configs via Glob
 3. Emit the Output Format below
 
 Review checklist:
