@@ -65,7 +65,8 @@ block() {
   exit 2
 }
 
-input=$(cat)
+input=$(cat; printf '.')
+input="${input%.}"
 
 # Direct invocation with no hook payload is a main-session/no-op probe.
 if [[ -z "$input" ]]; then
@@ -74,34 +75,27 @@ if [[ -z "$input" ]]; then
   exit 0
 fi
 
-parse_ok=0
-if command -v jq >/dev/null 2>&1; then
-  if printf '%s' "$input" | jq -e . >/dev/null 2>&1; then
-    cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // .tool_input.cmd // empty' 2>/dev/null || true)
-    agent=$(printf '%s' "$input" | jq -r '.agent_type // empty' 2>/dev/null || true)
-    parse_ok=1
-  fi
-else
-  # No jq: fail closed if any named agent_type appears in the raw payload.
-  if printf '%s' "$input" | grep -qE '"agent_type"[[:space:]]*:[[:space:]]*"[^"[:space:]]+"'; then
-    agent=$(printf '%s' "$input" | sed -n 's/.*"agent_type"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
-    parse_ok=0
-  else
-    cmd=$(printf '%s' "$input" | sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
-    agent=""
-    parse_ok=1
-  fi
+# A non-empty event requires the JSON parser, even when attribution is absent.
+# Slurp also rejects concatenated JSON documents rather than trusting the last one.
+if ! command -v jq >/dev/null 2>&1; then
+  block "[bash-hook] BLOCKED: jq unavailable — cannot attribute Bash event (rule:parse-no-jq)." "parse-no-jq"
 fi
-
+if ! printf '%s' "$input" | jq -e -s 'length == 1 and (.[0] | type == "object")' >/dev/null 2>&1; then
+  block "[bash-hook] BLOCKED: payload must be one JSON object (rule:schema)." "schema"
+fi
+if ! printf '%s' "$input" | jq -e '
+  (.agent_type == null or (.agent_type | type == "string")) and
+  ([.. | strings | contains("\u0000")] | any | not)
+' >/dev/null 2>&1; then
+  block "[bash-hook] BLOCKED: invalid attribution or NUL in payload (rule:schema)." "schema"
+fi
+# The sentinel preserves trailing newlines so command substitution cannot hide
+# a multiline command or turn a newline-only agent name into the main session.
+cmd=$(printf '%s' "$input" | jq -r 'try (.tool_input.command // .tool_input.cmd // empty | select(type == "string")) catch empty' 2>/dev/null || true; printf '.')
+cmd="${cmd%.}"; cmd="${cmd%$'\n'}"
+agent=$(printf '%s' "$input" | jq -r 'try (.agent_type // empty) catch empty' 2>/dev/null || true; printf '.')
+agent="${agent%.}"; agent="${agent%$'\n'}"
 observe_attribution
-
-# Parse failure while payload names a restricted agent → fail closed.
-if [[ "$parse_ok" -eq 0 ]]; then
-  if ! command -v jq >/dev/null 2>&1; then
-    block "[bash-hook] BLOCKED: jq unavailable — cannot attribute agent_type for Bash gate. Install jq." "parse-no-jq"
-  fi
-  block "[bash-hook] BLOCKED: cannot parse Bash tool payload (rule:parse)." "parse"
-fi
 
 if [[ -z "$agent" ]]; then
   audit_decision "main-session" "allow"
@@ -141,182 +135,165 @@ fi
 
 # --- Mutators only below ---
 
-# Reject multi-line commands on the RAW command, BEFORE normalization.
-if [[ "$cmd" == *$'\n'* || "$cmd" == *$'\r'* ]]; then
-  block "[bash-hook] BLOCKED: multi-line command (newline/carriage-return) forbidden for $agent (rule:no-newline)." "no-newline"
+# Tokenize once. Every command policy below consumes SEC_ARGV, not cmd.
+if ! sec_cmd_tokenize "$cmd"; then
+  block "[bash-hook] BLOCKED: empty, ambiguous, or unsupported shell command (rule:no-shell-meta)." "no-shell-meta"
+fi
+if sec_cmd_is_destructive "${SEC_ARGV[@]}"; then
+  block "[bash-hook] BLOCKED: destructive command denied (rule:deny-destructive)." "deny-destructive"
+fi
+if sec_cmd_is_network_or_escape "${SEC_ARGV[@]}"; then
+  block "[bash-hook] BLOCKED: network/shell-escape/interpreter denied (rule:deny-escape)." "deny-escape"
+fi
+if sec_cmd_is_package_install "${SEC_ARGV[@]}"; then
+  block "[bash-hook] BLOCKED: package install denied (rule:deny-install)." "deny-install"
 fi
 
-norm=$(sec_cmd_normalize "$cmd")
-
-if [[ -z "$norm" ]]; then
-  block "[bash-hook] BLOCKED: empty command (rule:empty)." "empty"
-fi
-
-# Single simple command: reject shell metacharacters / chaining / substitution.
-if sec_cmd_has_shell_meta "$norm"; then
-  block "[bash-hook] BLOCKED: shell operators/substitutions forbidden for $agent (rule:no-shell-meta). Run one simple command per call." "no-shell-meta"
-fi
-
-# Hard denylist (destructive / network / interpreters as code runners / package install)
-if sec_cmd_is_destructive "$norm"; then
-  block "[bash-hook] BLOCKED: destructive command denied for $agent (rule:deny-destructive)." "deny-destructive"
-fi
-if sec_cmd_is_network_or_escape "$norm"; then
-  block "[bash-hook] BLOCKED: network/shell-escape/interpreter -e denied for $agent (rule:deny-escape)." "deny-escape"
-fi
-if sec_cmd_is_package_install "$norm"; then
-  block "[bash-hook] BLOCKED: package install denied for $agent (rule:deny-install)." "deny-install"
-fi
-
-validate_config_url_literal() {
-  local config_url="$1" config_host
-  [[ -n "$config_url" ]] || return 0
-  config_host="$(sec_url_extract_host "$config_url")"
-  if [[ -z "$config_host" ]] || ! sec_is_host_safe "$config_host" "${E2E_ALLOWED_HOSTS:-}"; then
-    block "[bash-hook] BLOCKED: playwright.config baseURL not local/staging (rule:prod-guard-config)." "prod-guard-config"
+validate_url() {
+  local url="$1" rule="${2:-prod-guard}" host
+  host="$(sec_url_extract_host "$url")"
+  if [[ -z "$url" || -z "$host" ]] || ! sec_is_host_safe "$host" "${E2E_ALLOWED_HOSTS:-}"; then
+    block "[bash-hook] BLOCKED: URL host not local or on staging allowlist (rule:$rule)." "$rule"
   fi
 }
 
-# Fail closed when a baseURL key exists but no http(s) host can be statically
-# resolved. Same-line literals are checked first; the following line covers
-# multiline `baseURL:\n  'https://...'` assignments. Indirect `baseURL: target`
-# with the URL on another line cannot be proven safe → block.
 validate_config_file() {
-  local cfg="$1" config_url url_count=0
-  if [[ ! -f "$cfg" ]]; then
-    block "[bash-hook] BLOCKED: Playwright config file not found (rule:prod-guard-config)." "prod-guard-config-missing"
+  local cfg="$1" urls config_url
+  [[ -f "$cfg" ]] || block "[bash-hook] BLOCKED: Playwright config file not found (rule:prod-guard-config)." "prod-guard-config-missing"
+  # Capture the parser status directly; process substitution would lose failures.
+  if ! urls=$(sec_config_base_urls "$cfg" 2>/dev/null); then
+    block "[bash-hook] BLOCKED: playwright.config baseURL cannot be resolved statically (rule:prod-guard-config)." "prod-guard-config-unresolved"
   fi
   while IFS= read -r config_url; do
     [[ -n "$config_url" ]] || continue
-    url_count=$((url_count + 1))
-    validate_config_url_literal "$config_url"
-  done < <(grep -iE 'baseURL[[:space:]]*:' "$cfg" 2>/dev/null | grep -ioE 'https?://[^[:space:]"'"'"']+' || true)
+    validate_url "$config_url" "prod-guard-config"
+  done <<< "$urls"
+}
 
-  if [[ "$url_count" -eq 0 ]] && grep -qiE 'baseURL[[:space:]]*:' "$cfg" 2>/dev/null; then
-    while IFS= read -r config_url; do
-      [[ -n "$config_url" ]] || continue
-      url_count=$((url_count + 1))
-      validate_config_url_literal "$config_url"
-    done < <(awk 'tolower($0) ~ /baseurl[ \t]*:/ { want=1; next } want { print; want=0 }' "$cfg" | grep -ioE 'https?://[^[:space:]"'"'"']+' || true)
+# Option values are read from the same argv array, preserving spaces in paths.
+# The option matcher has already set SEC_OPT_ATTACHED and SEC_OPT_VALUE.
+option_value() {
+  if [[ "$SEC_OPT_ATTACHED" -eq 1 ]]; then
+    option_value_result="$SEC_OPT_VALUE"
+  else
+    i=$((i + 1))
+    option_value_result="${SEC_ARGV[i]:-}"
   fi
-
-  if grep -qiE 'baseURL[[:space:]]*:' "$cfg" 2>/dev/null && [[ "$url_count" -eq 0 ]]; then
-    block "[bash-hook] BLOCKED: playwright.config baseURL cannot be resolved statically (rule:prod-guard-config)." "prod-guard-config-unresolved"
+  if [[ -z "$option_value_result" || "$option_value_result" == -* ]]; then
+    block "[bash-hook] BLOCKED: option requires a non-empty value (rule:option-value)." "option-value"
   fi
 }
 
 allowed=0
 case "$agent" in
   e2e-runner)
-    # Production-target guard — every candidate authority must be local/test/staging.
-    if [[ -n "${BASE_URL:-}" ]]; then
-      _host="$(sec_url_extract_host "$BASE_URL")"
-      if [[ -z "$_host" ]]; then
-        block "[bash-hook] BLOCKED: BASE_URL has no parseable host (rule:prod-guard)." "prod-guard"
-      fi
-      if ! sec_is_host_safe "$_host" "${E2E_ALLOWED_HOSTS:-}"; then
-        block "[bash-hook] BLOCKED: BASE_URL host not on approved staging allowlist (rule:prod-guard)." "prod-guard"
-      fi
-    fi
+    launcher="${SEC_ARGV[0]}"
+    subcommand="${SEC_ARGV[1]:-}"
+    arg_start=2
+    case "$launcher" in
+      playwright|node_modules/.bin/playwright) launcher=playwright ;;
+      npx)
+        if [[ "${SEC_ARGV[1]:-}" == --no-install && "${SEC_ARGV[2]:-}" == playwright ]]; then
+          launcher=playwright; subcommand="${SEC_ARGV[3]:-}"; arg_start=4
+        fi
+        ;;
+    esac
+    # Exact argv launcher/subcommand matching, before any token is consumed.
+    case "$launcher" in
+      playwright)
+        case "$subcommand" in
+          test|show-report|codegen) allowed=1 ;;
+          install)
+            if [[ ${#SEC_ARGV[@]} -eq $((arg_start + 1)) && "${SEC_ARGV[arg_start]}" == --with-deps ]]; then
+              allowed=1
+            fi
+            ;;
+        esac
+        ;;
+      git) case "$subcommand" in status|diff|log|show) allowed=1 ;; esac ;;
+      ls|which) allowed=1; arg_start=1 ;;
+      command) [[ "$subcommand" == -v ]] && allowed=1 ;;
+    esac
+    [[ "$allowed" -eq 1 ]] || block "[bash-hook] BLOCKED: command not on allowlist for $agent (rule:allowlist)." "allowlist"
 
-    # Validate explicit --base-url args (incl. protocol-relative //host).
-    # Flag present with no parseable host (--base-url= / bare --base-url) is a block,
-    # not a skip of the config fallback.
-    _base_url_flag=0
-    _base_url_hosts=0
-    if printf '%s' "$norm" | grep -qE -- '(^|[[:space:]])--base-url(=|[[:space:]]|$)'; then
-      _base_url_flag=1
-    fi
-    set -f
-    for _b in $(printf '%s' "$norm" | grep -oE -- '--base-url=[^[:space:]]+' | cut -d= -f2- || true) \
-              $(printf '%s' "$norm" | grep -oE -- '--base-url[[:space:]]+[^[:space:]]+' | sed 's/^--base-url[[:space:]]*//' || true); do
-      [[ -z "$_b" ]] && continue
-      _b="${_b#\"}"; _b="${_b%\"}"
-      _b="${_b#\'}"; _b="${_b%\'}"
-      _bh="$(sec_url_extract_host "$_b")"
-      if [[ -z "$_bh" ]]; then
-        set +f
-        block "[bash-hook] BLOCKED: --base-url has no parseable host (rule:prod-guard)." "prod-guard"
+    snapshot=0
+    base_url_hosts=0
+    config_paths=()
+    # Inspect all argv words for denied/privileged options, even after --. This
+    # deliberately cannot let an approval be borrowed by another command family.
+    for arg in "${SEC_ARGV[@]}"; do
+      if sec_arg_option "$arg" --update-snapshots || [[ "$arg" == -u ]]; then
+        snapshot=1
+      elif [[ "$launcher" == playwright && "$subcommand" == test ]] && sec_arg_option "$arg" --update-snapshots -u; then
+        snapshot=1
       fi
-      if ! sec_is_host_safe "$_bh" "${E2E_ALLOWED_HOSTS:-}"; then
-        set +f
-        block "[bash-hook] BLOCKED: --base-url host not on approved staging allowlist (rule:prod-guard)." "prod-guard"
+      if [[ "$launcher" == git ]] && sec_arg_option "$arg" --output; then
+        block "[bash-hook] BLOCKED: writable git option --output denied (rule:deny-git-output)." "deny-git-output"
       fi
-      _base_url_hosts=$((_base_url_hosts + 1))
+      if [[ "$launcher" == playwright && "$subcommand" == codegen ]]; then
+        if sec_arg_option "$arg" --output -o || sec_arg_option "$arg" --save-har || sec_arg_option "$arg" --save-storage; then
+          block "[bash-hook] BLOCKED: writable codegen option denied (rule:deny-codegen-output)." "deny-codegen-output"
+        fi
+      fi
+      # URLs may be positionals or attached option values; inspect the argv word
+      # itself rather than losing word boundaries through a command re-join.
+      url_candidate="$arg"
+      [[ "$url_candidate" == --*=* ]] && url_candidate="${url_candidate#*=}"
+      case "$url_candidate" in
+        [Hh][Tt][Tt][Pp]://*|[Hh][Tt][Tt][Pp][Ss]://*|//*) validate_url "$url_candidate" ;;
+      esac
     done
-    set +f
-    if [[ "$_base_url_flag" -eq 1 && "$_base_url_hosts" -eq 0 ]]; then
-      block "[bash-hook] BLOCKED: --base-url requires a parseable host (rule:prod-guard)." "prod-guard"
-    fi
+    [[ -z "${BASE_URL:-}" ]] || validate_url "$BASE_URL"
 
-    # Validate inline URLs
-    while IFS= read -r _u; do
-      [[ -z "$_u" ]] && continue
-      _ih="$(sec_url_extract_host "$_u")"
-      if [[ -z "$_ih" ]]; then
-        block "[bash-hook] BLOCKED: inline URL has no parseable host (rule:prod-guard)." "prod-guard"
-      fi
-      if ! sec_is_host_safe "$_ih" "${E2E_ALLOWED_HOSTS:-}"; then
-        block "[bash-hook] BLOCKED: inline URL host not on approved staging allowlist (rule:prod-guard)." "prod-guard"
-      fi
-    done < <(printf '%s' "$norm" | grep -ioE 'https?://[^[:space:]"'"'"']+' || true)
-
-    # Validate the effective config path
-    if printf '%s' "$norm" | grep -qE '^(node_modules/\.bin/playwright|playwright|npx[[:space:]]+--no-install[[:space:]]+playwright)[[:space:]]+(test|codegen)([[:space:]]|$)'; then
-      if [[ -z "${BASE_URL:-}" && "$_base_url_hosts" -eq 0 ]]; then
+    if [[ "$launcher" == playwright && ( "$subcommand" == test || "$subcommand" == codegen ) ]]; then
+      for ((i=arg_start; i<${#SEC_ARGV[@]}; i++)); do
+        arg="${SEC_ARGV[i]}"
+        [[ "$arg" == -- ]] && break
+        if sec_arg_option "$arg" --base-url; then
+          option_value
+          validate_url "$option_value_result"
+          base_url_hosts=$((base_url_hosts + 1))
+        elif sec_arg_option "$arg" --config -c; then
+          option_value
+          config_paths+=("$option_value_result")
+        fi
+      done
+      if [[ -z "${BASE_URL:-}" && "$base_url_hosts" -eq 0 ]]; then
         block "[bash-hook] BLOCKED: playwright test/codegen requires attested BASE_URL or --base-url (rule:prod-guard)." "prod-guard"
       fi
-      _config_path=""
-      if [[ "$norm" =~ (^|[[:space:]])--config=([^[:space:]]+) ]]; then
-        _config_path="${BASH_REMATCH[2]}"
-      elif [[ "$norm" =~ (^|[[:space:]])--config[[:space:]]+([^[:space:]]+) ]]; then
-        _config_path="${BASH_REMATCH[2]}"
-      elif printf '%s' "$norm" | grep -qE -- '(^|[[:space:]])--config([[:space:]]|$)'; then
-        block "[bash-hook] BLOCKED: --config requires a path (rule:prod-guard-config)." "prod-guard-config-arg"
-      fi
-      _config_path="${_config_path#\"}"; _config_path="${_config_path%\"}"
-      _config_path="${_config_path#\'}"; _config_path="${_config_path%\'}"
-      if [[ -n "$_config_path" ]]; then
-        validate_config_file "$_config_path"
-      fi
-      # BASE_URL / --base-url are extra candidate authorities, not a skip of cwd config.
-      for cfg in playwright.config.*; do
-        [[ -f "$cfg" ]] || continue
-        [[ -n "$_config_path" && "$cfg" == "$_config_path" ]] && continue
-        validate_config_file "$cfg"
+      # Validate every supplied config, including duplicates. For a directory
+      # argument use the same supported default filenames as Playwright. Refuse
+      # multiple candidates instead of guessing precedence between extensions.
+      # An explicit config replaces cwd discovery; BASE_URL never bypasses it.
+      if [[ ${#config_paths[@]} -eq 0 ]]; then config_paths=("."); fi
+      for config_path in "${config_paths[@]}"; do
+        if [[ -d "$config_path" ]]; then
+          found_configs=()
+          for extension in ts js mts mjs cts cjs; do
+            cfg="${config_path%/}/playwright.config.$extension"
+            [[ ! -f "$cfg" ]] || found_configs+=("$cfg")
+          done
+          if [[ ${#found_configs[@]} -gt 1 ]]; then
+            block "[bash-hook] BLOCKED: ambiguous Playwright config directory (rule:prod-guard-config)." "prod-guard-config-ambiguous"
+          fi
+          if [[ ${#found_configs[@]} -eq 1 ]]; then validate_config_file "${found_configs[0]}"; fi
+        else
+          validate_config_file "$config_path"
+        fi
       done
     fi
 
-    # Privileged commands requiring one-shot approvals
-    if printf '%s' "$norm" | grep -qE 'playwright[[:space:]]+install[[:space:]]+--with-deps'; then
-      if ! printf '%s' "$norm" | grep -qE '^(node_modules/\.bin/playwright|playwright|npx[[:space:]]+--no-install[[:space:]]+playwright)[[:space:]]+install[[:space:]]+--with-deps$'; then
-        block "[bash-hook] BLOCKED: invalid privileged Playwright install command (rule:approval-command)." "approval-command"
-      fi
-      if sec_consume_approval "$APPROVAL_DIR" "with-deps" "$APPROVAL_MAX_AGE_SEC"; then
-        allowed=1
-      else
-        block "[bash-hook] BLOCKED: playwright install --with-deps needs orchestrator approval file hooks/approvals/with-deps (max ${APPROVAL_MAX_AGE_SEC}s, one-shot)." "approval-required"
-      fi
-    elif printf '%s' "$norm" | grep -qE -- '(--update-snapshots|(^|[[:space:]])-u([[:space:]]|$))'; then
-      if ! printf '%s' "$norm" | grep -qE '^(node_modules/\.bin/playwright|playwright|npx[[:space:]]+--no-install[[:space:]]+playwright)[[:space:]]+test([[:space:]]|$)'; then
+    # Consume one-shot approval only after launcher, options, URLs and configs
+    # are all validated. An approved invocation cannot skip a deny rule.
+    if [[ "$snapshot" -eq 1 ]]; then
+      if [[ "$launcher" != playwright || "$subcommand" != test ]]; then
         block "[bash-hook] BLOCKED: invalid snapshot command launcher (rule:approval-command)." "approval-command"
       fi
-      if sec_consume_approval "$APPROVAL_DIR" "snapshots" "$APPROVAL_MAX_AGE_SEC"; then
-        allowed=1
-      else
+      sec_consume_approval "$APPROVAL_DIR" snapshots "$APPROVAL_MAX_AGE_SEC" ||
         block "[bash-hook] BLOCKED: --update-snapshots needs orchestrator approval file hooks/approvals/snapshots (max ${APPROVAL_MAX_AGE_SEC}s, one-shot)." "approval-required"
-      fi
-    # Safe local Playwright invocations + read-only git/ls/which
-    elif printf '%s' "$norm" | grep -qiE \
-      '^(node_modules/\.bin/playwright|playwright|npx[[:space:]]+--no-install[[:space:]]+playwright)[[:space:]]+(test|show-report|codegen)([[:space:]]|$)|^git[[:space:]]+(status|diff|log|show)([[:space:]]|$)|^ls([[:space:]]|$)|^which([[:space:]]|$)|^command[[:space:]]+-v([[:space:]]|$)'; then
-      _norm_clean="$(printf '%s' "$norm" | tr -d '"'\''\\')"
-      if printf '%s' "$_norm_clean" | grep -qiE '^git[[:space:]]+(diff|show|log)[[:space:]].*--output='; then
-        block "[bash-hook] BLOCKED: writable git option --output= denied for $agent (rule:deny-git-output)." "deny-git-output"
-      fi
-      if printf '%s' "$_norm_clean" | grep -qiE 'playwright[[:space:]]+codegen([[:space:]].*)?(--output(=|[[:space:]])|-o([[:space:]]|=))'; then
-        block "[bash-hook] BLOCKED: writable playwright codegen option --output/-o denied for $agent (rule:deny-codegen-output)." "deny-codegen-output"
-      fi
-      allowed=1
+    elif [[ "$launcher" == playwright && "$subcommand" == install ]]; then
+      sec_consume_approval "$APPROVAL_DIR" with-deps "$APPROVAL_MAX_AGE_SEC" ||
+        block "[bash-hook] BLOCKED: playwright install --with-deps needs orchestrator approval file hooks/approvals/with-deps (max ${APPROVAL_MAX_AGE_SEC}s, one-shot)." "approval-required"
     fi
     ;;
 esac
@@ -325,5 +302,4 @@ if [[ "$allowed" -eq 1 ]]; then
   audit_decision "allowlist" "allow"
   exit 0
 fi
-
 block "[bash-hook] BLOCKED: command not on allowlist for $agent (rule:allowlist)." "allowlist"
