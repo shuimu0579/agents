@@ -37,11 +37,12 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 0
 fi
 
-if ! printf '%s' "$input" | jq -e . >/dev/null 2>&1; then
-  if raw_payload_names_xixi; then
-    deny "[xixi-hook] BLOCKED: malformed JSON for _xixi Write; refusing to fail open."
-  fi
-  exit 0
+# Direct invocation with no hook payload is a main-session/no-op probe, matching
+# restrict-bash-by-agent.sh. A NON-EMPTY payload that is not an event object is a
+# denial, not a pass-through: jq -e . accepts any truthy JSON, so an array or string
+# used to reach the sandbox checks with every field silently empty.
+if [[ -n "$input" ]] && ! printf '%s' "$input" | jq -e 'type == "object"' >/dev/null 2>&1; then
+  deny "[xixi-hook] BLOCKED: payload must be a JSON object (rule:schema)."
 fi
 
 if [[ ! -r "${XIXI_DIR}/common.sh" ]]; then
@@ -57,8 +58,8 @@ for fn in is_xixi_agent is_allowed_xixi_path reserve_xixi_path assert_reserved_x
   fi
 done
 
-file_path=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty')
-agent_type=$(printf '%s' "$input" | jq -r '.agent_type // empty')
+file_path=$(printf '%s' "$input" | jq -r 'try (.tool_input.file_path // empty) catch empty' 2>/dev/null || true)
+agent_type=$(printf '%s' "$input" | jq -r 'try (.agent_type // empty) catch empty' 2>/dev/null || true)
 
 if ! is_xixi_agent "$agent_type"; then
   exit 0

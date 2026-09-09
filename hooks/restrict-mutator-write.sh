@@ -56,12 +56,13 @@ agent=""
 file_path=""
 cwd=""
 if command -v jq >/dev/null 2>&1; then
-  if printf '%s' "$input" | jq -e . >/dev/null 2>&1; then
-    agent=$(printf '%s' "$input" | jq -r '.agent_type // empty' 2>/dev/null || true)
-    file_path=$(printf '%s' "$input" | jq -r '.tool_input.file_path // .tool_input.path // empty' 2>/dev/null || true)
-    cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null || true)
-    parse_ok=1
+  if ! printf '%s' "$input" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    block "[write-hook] BLOCKED: payload must be a JSON object (rule:schema)."
   fi
+  agent=$(printf '%s' "$input" | jq -r 'try (.agent_type // empty) catch empty' 2>/dev/null || true)
+  file_path=$(printf '%s' "$input" | jq -r 'try (.tool_input.file_path // .tool_input.path // empty) catch empty' 2>/dev/null || true)
+  cwd=$(printf '%s' "$input" | jq -r 'try (.cwd // empty) catch empty' 2>/dev/null || true)
+  parse_ok=1
 else
   if printf '%s' "$input" | grep -qE '"agent_type"[[:space:]]*:[[:space:]]*"[^"[:space:]]+"'; then
     block "[write-hook] BLOCKED: jq unavailable — cannot attribute agent_type for Write/Edit gate. Install jq."
@@ -89,15 +90,47 @@ fi
 if [[ "$resolved" != /* ]]; then
   resolved="${cwd%/}/${resolved}"
 fi
+# Pure-shell lexical normalization: collapses "." and ".." without resolving
+# symlinks. canon_path (python3) is still preferred because it also resolves
+# symlinks, but the approvals rule is documented as unconditional, so it must not
+# depend on python3 being installed. Without this, a path such as
+# .../hooks/lib/../approvals/with-deps never matches the approvals glob.
+lexical_norm() {
+  local p="$1" seg out=() oldifs="$IFS"
+  IFS='/' read -r -a _segs <<< "$p"
+  IFS="$oldifs"
+  for seg in ${_segs[@]+"${_segs[@]}"}; do
+    case "$seg" in
+      ''|.) continue ;;
+      ..)   [[ ${#out[@]} -gt 0 ]] && unset "out[$(( ${#out[@]} - 1 ))]" ;;
+      *)    out+=("$seg") ;;
+    esac
+  done
+  if [[ ${#out[@]} -eq 0 ]]; then printf '/'; else printf '/%s' "${out[@]}"; fi
+}
+
+_norm_ok=0
 if command -v python3 >/dev/null 2>&1; then
   _canon="$(canon_path "$resolved")"
   _canon_rc=$?
-  if [[ -n "$agent" && ( "$_canon_rc" -ne 0 || -z "$_canon" ) ]]; then
+  if [[ "$_canon_rc" -eq 0 && -n "$_canon" ]]; then
+    resolved="$_canon"; _norm_ok=1
+  fi
+fi
+if [[ "$_norm_ok" -eq 0 ]]; then
+  _lex="$(lexical_norm "$resolved" 2>/dev/null || true)"
+  if [[ -n "$_lex" && "$_lex" == /* ]]; then
+    resolved="$_lex"; _norm_ok=1
+  fi
+fi
+# Fail closed: an attributed write whose path cannot be normalized at all is denied,
+# and so is ANY write (main session included) once normalization has failed, because
+# the approvals rule below is unconditional and cannot be evaluated on a raw path.
+if [[ "$_norm_ok" -eq 0 ]]; then
+  if [[ -n "$agent" ]]; then
     block "[write-hook] BLOCKED: cannot normalize Write/Edit path for $agent (rule:self-protect)."
   fi
-  [[ -n "$_canon" ]] && resolved="$_canon"
-elif [[ -n "$agent" ]]; then
-  block "[write-hook] BLOCKED: python3 unavailable — cannot normalize Write/Edit path for $agent."
+  block "[write-hook] BLOCKED: cannot normalize path; approval protection cannot be evaluated (rule:approvals)."
 fi
 
 # Darwin APFS is case-insensitive; string compare after realpath is not enough.
@@ -140,6 +173,15 @@ is_protected() {
     path_matches "$p" "${CLAUDE_HOME}/scripts" && return 0
     path_matches "$p" "${CLAUDE_HOME}/settings.json" && return 0
     path_matches "$p" "${CLAUDE_HOME}/settings.local.json" && return 0
+    # The live policy registry decides what agents may do; an agent writing it
+    # rewrites its own limits (audit #7).
+    path_matches "$p" "${CLAUDE_HOME}/rules" && return 0
+    # Project-local settings are loaded the same way the CLAUDE_HOME copies are.
+    path_matches "$p" "${FLEET_ROOT}/.claude/settings.json" && return 0
+    path_matches "$p" "${FLEET_ROOT}/.claude/settings.local.json" && return 0
+    # .git holds executable configuration: config can name diff/textconv helpers and
+    # .git/hooks runs on ordinary git operations.
+    path_matches "$p" "${FLEET_ROOT}/.git" && return 0
     local settings_real
     for settings_real in "${CLAUDE_HOME}/settings.json" "${CLAUDE_HOME}/settings.local.json"; do
       if command -v python3 >/dev/null 2>&1; then
