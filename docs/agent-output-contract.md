@@ -71,9 +71,8 @@ Guardrails match exact rows of the form `| <agent> | <token> |` (optional backti
 
 ```markdown
 # <Agent> Report
-**Verdict:** GO | BLOCK | NEEDS_INPUT
 **Domain status:** <agent-specific token>
-**Scope:** <exact paths / diff SHA — APPROVE MUST be bound to the reviewed SHA (grill F24)>
+**Scope:** <exact paths and/or a stable scope identifier — a commit SHA, a dispatcher-provided patch hash, a base/head pair, or paths + a diff snapshot timestamp. APPROVE/GO MUST bind to this identifier (grill F24). A SHA is preferred but is not always available: an uncommitted working-tree review has none, and demanding one would make every pre-commit review unanswerable.>
 
 ## Findings
 - [SEVERITY] File: path:line — <summary>
@@ -86,6 +85,8 @@ Guardrails match exact rows of the form `| <agent> | <token> |` (optional backti
 
 ## Handoff
 - Next owner per `rules/agents.md` pipeline
+
+**Verdict:** GO | BLOCK | NEEDS_INPUT
 ```
 
 ## Handoff adjacency

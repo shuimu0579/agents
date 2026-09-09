@@ -4,9 +4,34 @@ A lean repository of Codex sub-agent definitions. Git checkout lives at `~/.clau
 
 ## Prerequisites
 
-- Codex (CLI that loads the generated `~/.codex/agents/*.toml` mirror of this repo)
-- Bash (for tests)
-- Optional: Playwright when using the `e2e-runner` templates (the **orchestrator** runs it; the agent has no execution — ADR 0002)
+Dropping these files into `~/.claude/agents/` does **not** install the enforcement layer.
+The hooks are what constrain agents, and they need both their dependencies and their
+registration to be present.
+
+| Requirement | Used by | If missing |
+|---|---|---|
+| Bash (macOS ships 3.2 — the hooks target it) | everything | nothing runs |
+| `jq` | both PreToolUse gates, `_xixi` hooks | **the gates deny every attributed event** (fail closed) |
+| `python3` | path canonicalization, `_xixi` inode checks | falls back to lexical normalization; `_xixi` copy refuses |
+| `pbcopy` / `wl-copy` / `xclip` | `_xixi` clipboard delivery | delivery reports `⚠️ failed`; refinement still returned |
+| Hook registration in `~/.claude/settings.json` | all four hooks | **agents are unconstrained and every suite still passes** |
+| Codex + a current `~/.codex/agents/*.toml` mirror | Codex-side dispatch | Codex runs a stale agent definition |
+| Playwright (optional) | `e2e-runner` templates | the **orchestrator** runs it; the agent has no execution (ADR 0002) |
+
+### Preflight
+
+```bash
+command -v jq python3 >/dev/null || echo "MISSING: jq/python3 — gates will fail closed"
+ls -l hooks/*.sh hooks/xixi/*.sh | grep -v '^-rwx' && echo "MISSING: executable bit"
+bash tests/hook-e2e.test.sh          # asserts settings.json registers all four hooks
+bash scripts/sync-codex-mirror.sh --check
+bash tests/run_all.sh
+```
+
+Registration and dependency presence are the two failure modes the test suites cannot
+catch on their own: an unregistered hook leaves every suite green while constraining
+nothing. See `hooks/xixi/CONTRACT.md` for the one check that still has to be done by
+hand — whether the host stamps `agent_type` on subagent Write events.
 
 ## Active Agents
 
@@ -98,7 +123,21 @@ Do not commit *Beyond Feelings* (or any copyrighted book) into this repo. Distil
 
 ## Run
 
-There is no build or compile step. Claude Code auto-loads `*.md` from `~/.claude/agents/`. Codex loads the generated `~/.codex/agents/*.toml` mirror. Verify changes with the commands under Testing & CI.
+Claude Code auto-loads `*.md` from `~/.claude/agents/` — for it there is no build step.
+Codex does **not** read those files; it loads `~/.codex/agents/*.toml`, a generated
+mirror. That mirror is a real build artifact and it drifts silently: on 2026-09-09 three
+mirrors were still carrying pre-ADR-0002 bodies, so a Codex-dispatched `e2e-runner`
+believed it could still run Playwright days after `Bash` was removed from it.
+
+```bash
+bash scripts/sync-codex-mirror.sh          # regenerate stale mirrors from the .md sources
+bash scripts/sync-codex-mirror.sh --check  # exit 1 if any mirror is older than its source
+```
+
+Run the sync after **any** change to an agent `.md`. The `--check` form belongs in
+preflight; it is deliberately not part of `run_all.sh`, because a missing `~/.codex`
+directory is normal on a machine that only uses Claude Code and must not fail the
+suite. Verify other changes with the commands under Testing & CI.
 
 ## Testing & CI
 

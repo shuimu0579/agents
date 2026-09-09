@@ -27,6 +27,18 @@ skills:
   - grill-edge-cases
 ---
 
+> **Correction — 2026-09-09.** Two claims in this report do not hold and are kept here
+> only as a record of what was believed at the time:
+>
+> 1. The TOCTOU window was described as 杜绝 (eliminated). It was narrowed, not closed.
+>    `hooks/xixi/CONTRACT.md` states the opposite and is authoritative: the Write API
+>    exposes no `O_NOFOLLOW`, so a concurrent attacker replacing the inode between
+>    PreToolUse and the actual Write may still race.
+> 2. It cites `tests/lib/assert.sh` as verification evidence. That file has never
+>    existed in this repository.
+>
+> Treat conclusions in this document as historical, not as current guarantees.
+
 # Codebase Grill & Multi-Angle Architecture Roast Report
 
 ## Executive Summary
