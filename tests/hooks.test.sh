@@ -12,7 +12,7 @@ HOOK_SRC="${HOOK_SRC:-$HOME/.claude/agents/hooks/restrict-bash-by-agent.sh}"
 WRITE_HOOK_SRC="${WRITE_HOOK_SRC:-$(dirname -- "$HOOK_SRC")/restrict-mutator-write.sh}"
 SETTINGS="${SETTINGS:-$HOME/.claude/settings.json}"
 SCRIPT_DIR="$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-AGENT_CONTRACT_FILE="${AGENT_CONTRACT_FILE:-$SCRIPT_DIR/fixtures/agent-contract.tsv}"
+LIVE_CONTRACT_FILE="${AGENT_CONTRACT_FILE:-$SCRIPT_DIR/fixtures/agent-contract.tsv}"
 
 if [ ! -f "$HOOK_SRC" ]; then
   echo "FATAL: restrict-bash-by-agent.sh not found at $HOOK_SRC" >&2
@@ -49,6 +49,20 @@ fi
 : > "$FLEET_FAKE/tests/fixtures/agent-contract.tsv"
 HOOK_ROOT="$TMPD"
 HOOK_AUDIT_LOG="$TMPD/bash-gate.audit.log"
+
+# The Bash gate derives authority from the declared tool set (ADR 0002), and no agent in
+# the live fleet declares Bash any more. The allowlist and its command parser still exist
+# and still need coverage, so derive a GATE contract that grants e2e-runner Bash again.
+# Allowlist/parser assertions run against the gate contract; fleet policy (that the live
+# contract denies Bash) is asserted separately against LIVE_CONTRACT_FILE below.
+GATE_CONTRACT_FILE="$TMPD/bash-gate-contract.tsv"
+awk -F'|' -v OFS='|' '$1=="e2e-runner"{$2="Read, Write, Edit, Bash, Grep, Glob"}1' \
+  "$LIVE_CONTRACT_FILE" > "$GATE_CONTRACT_FILE"
+if ! grep -q '^e2e-runner|Read, Write, Edit, Bash, ' "$GATE_CONTRACT_FILE"; then
+  echo "FATAL: could not derive gate contract from $LIVE_CONTRACT_FILE" >&2
+  exit 2
+fi
+AGENT_CONTRACT_FILE="$GATE_CONTRACT_FILE"
 
 PASS=0
 FAIL=0
@@ -338,6 +352,50 @@ PY
   else
     FAIL=$((FAIL + 1)); echo "FAIL  settings.json does not register restrict-mutator-write hook"
   fi
+fi
+
+# --- ADR 0002: live fleet policy — no agent declares Bash, so every attributed
+# Bash call is denied. These run against the LIVE contract, not the gate contract,
+# so they fail the moment someone hands an agent Bash without the isolation ADR 0002
+# requires. Reverse-check: restoring Bash in the gate contract makes the same payloads
+# reach the allowlist (covered by the 100 assertions above).
+
+lt() {
+  local desc="$1" agent="$2" cmd="$3" exp="$4" rc payload out
+  shift 4
+  payload=$(jq -nc --arg a "$agent" --arg c "$cmd" '{agent_type:$a, tool_input:{command:$c}}')
+  out="$(cd "$TEST_CWD" && printf '%s' "$payload" | env AGENT_CONTRACT_FILE="$LIVE_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" "$@" bash "$BASH_HOOK" 2>&1)"
+  rc=$?
+  if [ "$rc" -eq "$exp" ] && printf '%s' "$out" | grep -q 'rule:no-bash-tool'; then
+    PASS=$((PASS + 1)); echo "PASS  $desc"
+  else
+    FAIL=$((FAIL + 1)); echo "FAIL  $desc (exit=$rc, want=$exp, want rule:no-bash-tool) :: $(printf '%s' "$out" | tr '\n' ' | ')"
+  fi
+}
+
+echo "==> ADR 0002: live contract denies Bash to every agent"
+lt "live: e2e-runner playwright test denied"   e2e-runner "node_modules/.bin/playwright test" 2 BASE_URL=http://localhost:3000
+lt "live: e2e-runner git status denied"        e2e-runner "git status" 2
+lt "live: e2e-runner ls denied"                e2e-runner "ls" 2
+lt "live: e2e-runner #1 quoted-snapshot denied" e2e-runner 'playwright test --update-"snapshots"' 2 BASE_URL=http://localhost:3000
+lt "live: e2e-runner #2 separated git output denied" e2e-runner "git diff --output /tmp/p1probe" 2
+lt "live: e2e-runner #3 attached codegen -o denied"  e2e-runner "playwright codegen -o/tmp/p1probe http://localhost:3000" 2 BASE_URL=http://localhost:3000
+
+# Every fleet agent must be Bash-less; a new Bash-capable row must break this.
+while IFS='|' read -r _name _tools _model _statuses _flag; do
+  case "$_name" in ''|\#*) continue ;; esac
+  if printf '%s' "$_tools" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -qx 'Bash'; then
+    FAIL=$((FAIL + 1)); echo "FAIL  live contract grants Bash to $_name without ADR 0002 isolation"
+  else
+    PASS=$((PASS + 1)); echo "PASS  live contract: $_name declares no Bash"
+  fi
+done < "$LIVE_CONTRACT_FILE"
+
+# Main session must stay unaffected by the tool-set gate.
+if printf '%s' '{"tool_input":{"command":"ls"}}' | env AGENT_CONTRACT_FILE="$LIVE_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" bash "$BASH_HOOK" >/dev/null 2>&1; then
+  PASS=$((PASS + 1)); echo "PASS  live contract: main session (no agent_type) unaffected"
+else
+  FAIL=$((FAIL + 1)); echo "FAIL  live contract: tool-set gate leaked onto the main session"
 fi
 
 echo

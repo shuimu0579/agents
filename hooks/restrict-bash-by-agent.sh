@@ -126,6 +126,19 @@ case "$agent_policy" in
     ;;
 esac
 
+# Bash authority is derived from the agent's DECLARED TOOL SET (contract column 2),
+# not from the write-semantics flag in column 5. The two columns are maintained by
+# hand and can disagree; deriving from the tools column removes that drift surface,
+# and lets an agent keep Write/Edit while losing execution (ADR 0002).
+# Fail closed: an unreadable, empty, or Bash-less tool set denies Bash.
+agent_tools="$(awk -F'|' -v target="$agent" '$1 == target { print $2; exit }' "$AGENT_CONTRACT_FILE" 2>/dev/null || true)"
+if [[ -z "$agent_tools" ]]; then
+  block "[bash-hook] BLOCKED: agent_type=$agent declares no tool set in the fleet contract (rule:no-tools)." "no-tools"
+fi
+if ! printf '%s' "$agent_tools" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -qx 'Bash'; then
+  block "[bash-hook] BLOCKED: agent_type=$agent does not declare the Bash tool (rule:no-bash-tool)." "no-bash-tool"
+fi
+
 # --- Mutators only below ---
 
 # Reject multi-line commands on the RAW command, BEFORE normalization.

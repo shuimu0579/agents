@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 HOOK="${HOOK_PATH:-${HOOK_SRC:-$REPO_ROOT/hooks/restrict-bash-by-agent.sh}}"
 SETTINGS="${SETTINGS:-$HOME/.claude/settings.json}"
-AGENT_CONTRACT_FILE="${AGENT_CONTRACT_FILE:-$SCRIPT_DIR/fixtures/agent-contract.tsv}"
+LIVE_CONTRACT_FILE="${AGENT_CONTRACT_FILE:-$SCRIPT_DIR/fixtures/agent-contract.tsv}"
 
 PASS=0
 FAIL=0
@@ -91,6 +91,20 @@ fi
 
 TMP_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMP_ROOT"' EXIT
+
+# ADR 0002 removed Bash from every fleet agent, so the executable payload chain can no
+# longer be exercised through a live agent. Derive a gate contract that grants e2e-runner
+# Bash again, for the registration/parsing chain only. Fleet policy — that the LIVE
+# contract denies it — is asserted separately at the end of this suite.
+# Kept inside TMP_ROOT so the trap above cleans it up: a second `trap ... EXIT` would
+# silently replace that one and leak the temp tree.
+AGENT_CONTRACT_FILE="$TMP_ROOT/bash-gate-contract.tsv"
+awk -F'|' -v OFS='|' '$1=="e2e-runner"{$2="Read, Write, Edit, Bash, Grep, Glob"}1' \
+  "$LIVE_CONTRACT_FILE" > "$AGENT_CONTRACT_FILE"
+if ! grep -q '^e2e-runner|Read, Write, Edit, Bash, ' "$AGENT_CONTRACT_FILE"; then
+  echo "FATAL: could not derive gate contract from $LIVE_CONTRACT_FILE" >&2
+  exit 2
+fi
 SAFE_CWD="$TMP_ROOT/cwd"
 TMP_HOME="$TMP_ROOT/home"
 APPROVAL_DIR="$TMP_ROOT/approvals"
@@ -149,5 +163,14 @@ else
 fi
 
 echo
+# --- ADR 0002: the live contract must deny Bash to the same payload chain ---
+live_denied="$(cd "$SAFE_CWD" && printf '%s' "$allowed_payload" | env BASE_URL=http://localhost:3000 HOME="$TMP_HOME" APPROVAL_DIR="$APPROVAL_DIR" AGENT_CONTRACT_FILE="$LIVE_CONTRACT_FILE" HOOK_AUDIT_LOG="$AUDIT_LOG" "$HOOK" 2>&1)"
+live_rc=$?
+if [[ "$live_rc" -eq 2 ]] && printf '%s' "$live_denied" | grep -q 'rule:no-bash-tool'; then
+  pass "live contract: same allowlisted payload is denied (no Bash tool declared)"
+else
+  fail "live contract did not deny the e2e payload (exit=$live_rc; output: $(printf '%s' "$live_denied" | tr '\n' ' | '))"
+fi
+
 echo "==> result: $PASS passed, $FAIL failed"
 [[ "$FAIL" -eq 0 ]]
