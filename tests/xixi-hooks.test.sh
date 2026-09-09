@@ -295,6 +295,32 @@ run_hook "$BROKEN_COPY_DIR/copy-on-write.sh" "$(write_payload "_xixi" "/tmp/xixi
 assert_rc "copy-on-write missing common.sh exits 0" 0
 assert_output_contains "copy-on-write missing common.sh emits warning" "common.sh missing"
 
+# --- Attribution matrix (audit #43) -------------------------------------------
+# The sandbox applies ONLY when the host stamps agent_type on the Write event.
+# CONTRACT.md records that this prerequisite has never been re-verified against a
+# live harness, and nothing here can verify it — these assertions pin the HOOK
+# side of the contract so a regression in the hook cannot be mistaken for the
+# host-side gap. See CONTRACT.md "Attribution prerequisite" for the manual check.
+
+run_hook "$HOOK_DIR/restrict-write.sh" "$(write_payload "_xixi" "/tmp/outside-the-sandbox.txt")"
+assert_rc "attribution: _xixi outside the sandbox is denied" 2
+
+run_hook "$HOOK_DIR/restrict-write.sh" "$(write_payload "xixi" "/tmp/outside-the-sandbox.txt")"
+assert_rc "attribution: bare 'xixi' spelling is denied the same way" 2
+
+run_hook "$HOOK_DIR/restrict-write.sh" "$(write_payload "e2e-runner" "/tmp/outside-the-sandbox.txt")"
+assert_rc "attribution: a different agent is not this hook's business" 0
+
+run_hook "$HOOK_DIR/restrict-write.sh" "$(jq -nc '{tool_input:{file_path:"/tmp/outside-the-sandbox.txt"}}')"
+assert_rc "attribution: absent agent_type passes through as main session" 0
+
+# The pass-through above is exactly the failure mode CONTRACT.md warns about: if a
+# future harness omits agent_type on subagent Write, _xixi is unconstrained and this
+# suite still goes green. That is a host contract, not a hook bug — assert the shape
+# so the distinction stays visible.
+run_hook "$HOOK_DIR/restrict-write.sh" "$(write_payload "_xixi" "/etc/passwd")"
+assert_rc "attribution: sandbox denial is path-based, not extension-based" 2
+
 echo
 echo "==> result: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

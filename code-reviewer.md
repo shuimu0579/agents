@@ -60,7 +60,9 @@ This agent is **review-only** (no Write/Edit, **no Bash**). The orchestrator pro
 
 **Change set:** the orchestrator (main session) runs `git status` / `git diff` and hands you the paths and/or diff. If you are given no paths, ask the orchestrator for the change set — do not attempt to shell out.
 
-**Stale or partial scope:** if the supplied diff no longer matches the current files, one or more paths from the supplied change set are unreadable/deleted, or generated files are mixed into the change set, return **NEEDS_INPUT** naming exactly what is stale — never silently approve a partial or drifting scope.
+**Stale or partial scope:** if the supplied diff no longer matches the current files, a path is *unexpectedly* missing, or generated files are mixed into the change set, return **NEEDS_INPUT** naming exactly what is stale — never silently approve a partial or drifting scope.
+
+**Expected deletions are not stale scope.** A file the change set itself deletes is supposed to be gone: review it from the supplied diff/baseline content and report on it normally. Returning `NEEDS_INPUT` because a deleted file cannot be read would block every deletion review. Only a path missing that the change set does not account for is stale.
 
 **Evidence unavailable to this tool set:** the dispatcher must provide current test/coverage output and dependency vulnerability/license results when those facts affect approval. Without that evidence, mark each claim **NOT VERIFIED**; never infer coverage, passing tests, dependency safety, or license compatibility from source files alone. A material NOT VERIFIED item makes the verdict `NEEDS_INPUT`.
 
@@ -187,7 +189,7 @@ Map domain status → canonical Verdict per `agent-output-contract.md`:
 
 A CRITICAL finding is never overridden by agent APPROVE alone — it requires explicit human sign-off (grill F24).
 
-**Zero findings:** still emit the Summary (all zeros), `**Domain status:** APPROVE`, and `**Verdict:** GO`, bound to the scope identifier. Never invent findings to fill the template (grill F23).
+**Zero findings:** emit the Summary (all zeros), `**Domain status:** APPROVE`, and `**Verdict:** GO`, bound to the scope identifier — **but only when the evidence requirements above are satisfied**. Finding nothing is not the same as having looked: if the scope is stale or partial, a path in the change set is unexpectedly missing, or required evidence (tests, a runnable diff) was unavailable, the verdict is `NEEDS_INPUT` naming what is missing, not `GO`. Never invent findings to fill the template (grill F23).
 
 ## Project Guidelines
 

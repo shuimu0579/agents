@@ -9,10 +9,18 @@ set -euo pipefail
 try_exec() {
   local bin="$1"; shift || true
   if [ -n "$bin" ] && [ -x "$bin" ]; then
-    # Prefer root-owned system binaries when stat is available
+    # Prefer root-owned system binaries when stat is available.
+    # Select the stat dialect by platform instead of trying BSD first: GNU stat
+    # reads -f as --file-system and PRINTS filesystem details before failing, so a
+    # BSD-first `||` chain concatenates that output with the real answer and the
+    # comparison below rejects a legitimate Linux backend (audit #19).
     if command -v stat >/dev/null 2>&1; then
       local owner
-      owner=$(stat -f %Su "$bin" 2>/dev/null || stat -c %U "$bin" 2>/dev/null || echo "")
+      if [ "$(uname -s)" = "Darwin" ]; then
+        owner=$(stat -f %Su "$bin" 2>/dev/null) || owner=""
+      else
+        owner=$(stat -c %U "$bin" 2>/dev/null) || owner=""
+      fi
       case "$owner" in
         root|"") ;;
         *) echo "copy-prompt.sh: refusing non-root clipboard binary: $bin (owner=$owner)" >&2; return 1 ;;

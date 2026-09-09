@@ -83,6 +83,23 @@ bt() {
   fi
 }
 
+# bt_rule <desc> <agent> <cmd> <expect-exit> <expect-rule-substring> [VAR=VAL ...]
+# Asserts WHY a command was denied, not merely that it was. Several approval tests
+# used to pass while the production guard rejected them first for a missing BASE_URL,
+# so they stayed green even with the approval logic deleted (audit #18).
+bt_rule() {
+  local desc="$1" agent="$2" cmd="$3" exp="$4" want_rule="$5" rc payload out
+  shift 5
+  payload=$(jq -nc --arg a "$agent" --arg c "$cmd" '{agent_type:$a, tool_input:{command:$c}}')
+  out="$(cd "$TEST_CWD" && printf '%s' "$payload" | env AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" "$@" bash "$BASH_HOOK" 2>&1)"
+  rc=$?
+  if [ "$rc" -eq "$exp" ] && printf '%s' "$out" | grep -q -- "$want_rule"; then
+    PASS=$((PASS + 1)); echo "PASS  $desc"
+  else
+    FAIL=$((FAIL + 1)); echo "FAIL  $desc (exit=$rc want=$exp; rule '$want_rule' not found) :: $(printf '%s' "$out" | tr '\n' ' | ')"
+  fi
+}
+
 # bt_payload <desc> <full-json-payload> <expect-exit> [VAR=VAL ...]
 bt_payload() {
   local desc="$1" payload="$2" exp="$3" rc out
@@ -171,14 +188,14 @@ bt "e2e update-snapshots allow (approval file)" "e2e-runner" "playwright test --
 : > "$TMPD/approvals/snapshots"
 chmod 600 "$TMPD/approvals/snapshots"
 touch -t 202001010000 "$TMPD/approvals/snapshots"
-bt "e2e update-snapshots stale approval block" "e2e-runner" "playwright test --update-snapshots" 2
+bt_rule "e2e update-snapshots stale approval block" "e2e-runner" "playwright test --update-snapshots" 2 "needs orchestrator approval file" "BASE_URL=http://localhost:3000"
 : > "$TMPD/approvals/snapshots"
 chmod 600 "$TMPD/approvals/snapshots"
-bt "e2e -u cannot borrow approval (block)" "e2e-runner" "python3 -u /tmp/x.py" 2
+bt_rule "e2e -u cannot borrow approval (block)" "e2e-runner" "python3 -u /tmp/x.py" 2 "rule:" "BASE_URL=http://localhost:3000"
 
 : > "$TMPD/approvals/snapshots"
 chmod 644 "$TMPD/approvals/snapshots"
-bt "e2e approval mode must be 600" "e2e-runner" "playwright test --update-snapshots" 2
+bt_rule "e2e approval mode must be 600" "e2e-runner" "playwright test --update-snapshots" 2 "needs orchestrator approval file" "BASE_URL=http://localhost:3000"
 
 # Two concurrent consumers race for one token; exactly one can atomically claim it.
 : > "$TMPD/approvals/snapshots"
