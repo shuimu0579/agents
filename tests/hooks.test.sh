@@ -79,6 +79,20 @@ HOOK_ENV=(env -i PATH="$PATH" HOME="$TEST_HOME" TMPDIR="$TMPD"
   APPROVAL_DIR="$TMPD/approvals" AGENT_CONTRACT_FILE="$GATE_CONTRACT_FILE"
   HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" BASE_URL= E2E_ALLOWED_HOSTS=)
 
+# Approval tokens carry a session and repo binding since audit #21; an empty file is
+# refused. Mint them the way the orchestrator does so these tests exercise the real
+# format rather than a shape the gate no longer accepts.
+TEST_SESSION="hooks-test-session"
+mint_approval() {
+  local name="$1"
+  rm -f "$TMPD/approvals/$name" "$TMPD/approvals/$name".consuming.* 2>/dev/null || true
+  {
+    printf 'session=%s\n' "$TEST_SESSION"
+    printf 'repo=%s\n' "$(cd "$(dirname -- "$BASH_HOOK")/.." && pwd -P)"
+  } > "$TMPD/approvals/$name"
+  chmod 600 "$TMPD/approvals/$name"
+}
+
 PASS=0
 FAIL=0
 
@@ -88,7 +102,8 @@ echo "==> restrict-bash-by-agent.sh gate tests (isolated HOOK_ROOT=$HOOK_ROOT)"
 bt() {
   local desc="$1" agent="$2" cmd="$3" exp="$4" rc payload out
   shift 4
-  payload=$(jq -nc --arg a "$agent" --arg c "$cmd" '{agent_type:$a, tool_input:{command:$c}}')
+  payload=$(jq -nc --arg a "$agent" --arg c "$cmd" --arg s "$TEST_SESSION" \
+    '{session_id:$s, agent_type:$a, tool_input:{command:$c}}')
   out="$(cd "$TEST_CWD" && printf '%s' "$payload" | "${HOOK_ENV[@]}" AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" "$@" bash "$BASH_HOOK" 2>&1)"
   rc=$?
   if [ "$rc" -eq "$exp" ]; then
@@ -105,7 +120,8 @@ bt() {
 bt_rule() {
   local desc="$1" agent="$2" cmd="$3" exp="$4" want_rule="$5" rc payload out
   shift 5
-  payload=$(jq -nc --arg a "$agent" --arg c "$cmd" '{agent_type:$a, tool_input:{command:$c}}')
+  payload=$(jq -nc --arg a "$agent" --arg c "$cmd" --arg s "$TEST_SESSION" \
+    '{session_id:$s, agent_type:$a, tool_input:{command:$c}}')
   out="$(cd "$TEST_CWD" && printf '%s' "$payload" | "${HOOK_ENV[@]}" AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" "$@" bash "$BASH_HOOK" 2>&1)"
   rc=$?
   if [ "$rc" -eq "$exp" ] && printf '%s' "$out" | grep -q -- "$want_rule"; then
@@ -190,32 +206,29 @@ bt "e2e empty command block" "e2e-runner" "" 2
 
 # --- one-shot approvals (scoped; no -u borrow; expiry) ---
 bt "e2e with-deps block (no approval)" "e2e-runner" "npx --no-install playwright install --with-deps" 2
-: > "$TMPD/approvals/with-deps"
-chmod 600 "$TMPD/approvals/with-deps"
+mint_approval with-deps
 bt "e2e invalid install launcher cannot consume approval" "e2e-runner" "python3 /tmp/x.py playwright install --with-deps" 2
 bt "e2e with-deps allow (approval file)" "e2e-runner" "npx --no-install playwright install --with-deps" 0
 bt "e2e with-deps consumed (one-shot)" "e2e-runner" "npx --no-install playwright install --with-deps" 2
 bt "e2e update-snapshots block (no approval)" "e2e-runner" "playwright test --update-snapshots" 2
-: > "$TMPD/approvals/snapshots"
-chmod 600 "$TMPD/approvals/snapshots"
+mint_approval snapshots
 bt "e2e invalid snapshot launcher cannot consume approval" "e2e-runner" "python3 /tmp/x.py playwright test --update-snapshots" 2
 bt "e2e update-snapshots allow (approval file)" "e2e-runner" "playwright test --update-snapshots" 0 "BASE_URL=http://localhost:3000"
-: > "$TMPD/approvals/snapshots"
-chmod 600 "$TMPD/approvals/snapshots"
+mint_approval snapshots
 touch -t 202001010000 "$TMPD/approvals/snapshots"
 bt_rule "e2e update-snapshots stale approval block" "e2e-runner" "playwright test --update-snapshots" 2 "needs orchestrator approval file" "BASE_URL=http://localhost:3000"
-: > "$TMPD/approvals/snapshots"
-chmod 600 "$TMPD/approvals/snapshots"
+mint_approval snapshots
 bt_rule "e2e -u cannot borrow approval (block)" "e2e-runner" "python3 -u /tmp/x.py" 2 "rule:" "BASE_URL=http://localhost:3000"
 
-: > "$TMPD/approvals/snapshots"
+# Correctly bound but world-readable: this must fail on the MODE, not on the binding,
+# or the test stops covering the permission check.
+mint_approval snapshots
 chmod 644 "$TMPD/approvals/snapshots"
 bt_rule "e2e approval mode must be 600" "e2e-runner" "playwright test --update-snapshots" 2 "needs orchestrator approval file" "BASE_URL=http://localhost:3000"
 
 # Two concurrent consumers race for one token; exactly one can atomically claim it.
-: > "$TMPD/approvals/snapshots"
-chmod 600 "$TMPD/approvals/snapshots"
-race_payload=$(jq -nc '{agent_type:"e2e-runner",tool_input:{command:"playwright test --update-snapshots"}}')
+mint_approval snapshots
+race_payload=$(jq -nc --arg s "$TEST_SESSION" '{session_id:$s,agent_type:"e2e-runner",tool_input:{command:"playwright test --update-snapshots"}}')
 # Keep the test driver in the foreground; both children are joined before return.
 "${HOOK_ENV[@]}" BASE_URL=http://localhost:3000 python3 - "$TEST_CWD" "$BASH_HOOK" "$race_payload" "$TMPD" <<'RACE'
 import pathlib, subprocess, sys

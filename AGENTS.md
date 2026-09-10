@@ -18,6 +18,22 @@ registration to be present.
 | Codex + a current `~/.codex/agents/*.toml` mirror | Codex-side dispatch | Codex runs a stale agent definition |
 | Playwright (optional) | `e2e-runner` templates | the **orchestrator** runs it; the agent has no execution (ADR 0002) |
 
+### Minting a privileged approval
+
+`e2e-runner` cannot run anything (ADR 0002), so the two one-shot approvals exist for the
+orchestrator's own privileged operations. They are no longer empty files — a token that
+names nothing authorizes anything (audit #21):
+
+```bash
+scripts/create-approval.sh <with-deps|snapshots> <session-id>
+```
+
+The token binds the session and the repository, is created exclusively at mode 600, and
+is refused if either binding fails to match, if the caller presents no session id, or if
+it carries no binding fields. It is still one-shot and still expires after 300s. An agent
+cannot mint its own: the Write/Edit gate denies every write under `hooks/approvals/`
+unconditionally.
+
 ### Accepted dependency risk: the Codex MCP server
 
 `.codex/config.toml` launches the Claude Code bridge with `npx -y claude-octopus@<version>`.

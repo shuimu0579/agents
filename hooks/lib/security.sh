@@ -274,9 +274,18 @@ sec_is_host_safe() {
 }
 
 # Atomically consume a one-shot approval file (e.g. with-deps, snapshots)
+# sec_consume_approval <dir> <name> <max_age_sec> [expect_session] [expect_repo]
+#
+# A token that names nothing authorizes anything: before audit #21 these were empty
+# files, so a token minted by one session, or for one checkout, was consumable by any
+# other within the 300s window. When the caller supplies the expected session and repo,
+# both must match the token's contents or the claim is refused and the token is put
+# back for its rightful owner. A token with no binding fields is refused outright —
+# accepting it would leave the old behaviour reachable by simply omitting them.
 sec_consume_approval() {
   local approval_dir="$1" name="$2" max_age_sec="${3:-300}"
-  local f claim mode now mtime age
+  local expect_session="${4:-}" expect_repo="${5:-}"
+  local f claim mode now mtime age tok_session tok_repo
   f="${approval_dir}/${name}"
   if [[ ! -f "$f" ]]; then
     return 1
@@ -302,6 +311,27 @@ sec_consume_approval() {
   if [[ "$mtime" -eq 0 || "$age" -lt 0 || "$age" -ge "$max_age_sec" ]]; then
     rm -f -- "$claim" 2>/dev/null || true
     return 1
+  fi
+
+  # Binding check. `restore_and_refuse` puts the token back under its original name
+  # so a mismatched consumer cannot destroy an approval it was never entitled to.
+  restore_and_refuse() {
+    mv -- "$claim" "$f" 2>/dev/null || rm -f -- "$claim" 2>/dev/null || true
+    return 1
+  }
+  tok_session="$(sed -n 's/^session=//p' "$claim" 2>/dev/null | head -1)"
+  tok_repo="$(sed -n 's/^repo=//p' "$claim" 2>/dev/null | head -1)"
+  # A token with no binding fields is the pre-#21 shape and authorizes anything.
+  if [[ -z "$tok_session" || -z "$tok_repo" ]]; then
+    restore_and_refuse; return 1
+  fi
+  # Fail closed on a caller that presents nothing: an event without a session id must
+  # not be able to consume a token bound to one, or the binding is decorative.
+  if [[ -z "$expect_session" || "$tok_session" != "$expect_session" ]]; then
+    restore_and_refuse; return 1
+  fi
+  if [[ -z "$expect_repo" || "$tok_repo" != "$expect_repo" ]]; then
+    restore_and_refuse; return 1
   fi
 
   if ! rm -f -- "$claim" 2>/dev/null || [[ -e "$claim" || -L "$claim" ]]; then

@@ -69,10 +69,19 @@ These are **not** covered, and no test in this repository can detect them:
   precisely because no gate can constrain code that an allowed process then executes.
 * **Write/Edit protection is path-based, at the tool boundary.** It cannot intercept
   filesystem calls made by a process the gate already allowed.
-* **TOCTOU is narrowed, not closed.** The Write API exposes no `O_NOFOLLOW`.
-* **Approval tokens carry no operation binding** (audit #21, still open in P3): they are
-  named `with-deps` / `snapshots` and a concurrent run can consume one intended for
-  another operation.
+* **TOCTOU is narrowed, not closed** — restated here because audit #22 proposed binding
+  the write to the validated descriptor. That would require the host's Write to accept a
+  caller-supplied fd, which its API does not expose; the alternative is the OS isolation
+  ADR 0002 declined to build for a capability with no realized usage. The window stays
+  open by decision, not by oversight. `hooks/xixi/CONTRACT.md` records it at the call site.
+* **Approval binding covers session and repository, not the operation** (audit #21,
+  addressed in part). Tokens now carry `session=` and `repo=` and are refused when either
+  fails to match, when the caller presents no session, or when the token has no binding
+  fields at all. Cross-operation borrow was already prevented by the branch structure —
+  the gate consumes a token only after launcher, option and config validation, so a
+  `snapshots` token cannot authorize `install --with-deps`. What remains unbound is the
+  exact argv: two `--update-snapshots` runs in the same session and repo are
+  interchangeable within the 300s window.
 
 ### Confirmation
 

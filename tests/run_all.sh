@@ -59,6 +59,7 @@ run_suite "Hook Registration & E2E Tests (hook-e2e.test.sh)" bash tests/hook-e2e
 run_suite "P1 Bypass Probes (p1-bypass.test.sh)" bash tests/p1-bypass.test.sh
 run_suite "P3 Lib Hardening Probes (p3-lib-hardening.test.sh)" bash tests/p3-lib-hardening.test.sh
 run_suite "P3 Contract-Gate Meta Probes (p3-guardrails-quality.test.sh)" bash tests/p3-guardrails-quality.test.sh
+run_suite "P3 Approval Binding Probes (p3-approval-binding.test.sh)" bash tests/p3-approval-binding.test.sh
 
 echo
 echo "================================================================================"

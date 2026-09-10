@@ -29,12 +29,17 @@ if ! declare -F hook_deny_pre >/dev/null 2>&1 || ! declare -F sec_url_extract_ho
 fi
 
 APPROVAL_DIR="${APPROVAL_DIR:-${HOOKS_DIR}/approvals}"
+# The repository an approval is bound to (audit #21). Derived from the hook's own
+# location, so it names the fleet this gate belongs to rather than whatever tree the
+# command happens to be run from.
+FLEET_ROOT_FOR_APPROVAL="$(cd "${HOOKS_DIR}/.." && pwd -P)"
 APPROVAL_MAX_AGE_SEC=300
 AGENT_CONTRACT_FILE="${AGENT_CONTRACT_FILE:-${HOOKS_DIR}/../tests/fixtures/agent-contract.tsv}"
 HOOK_AUDIT_LOG="${HOOK_AUDIT_LOG:-${TMPDIR:-/tmp}/claude-agent-bash-gate.audit.log}"
 
 cmd=""
 agent=""
+session_id=""
 
 observe_attribution() {
   hook_observe_attribution "$agent"
@@ -95,6 +100,8 @@ cmd=$(printf '%s' "$input" | jq -r 'try (.tool_input.command // .tool_input.cmd 
 cmd="${cmd%.}"; cmd="${cmd%$'\n'}"
 agent=$(printf '%s' "$input" | jq -r 'try (.agent_type // empty) catch empty' 2>/dev/null || true; printf '.')
 agent="${agent%.}"; agent="${agent%$'\n'}"
+session_id=$(printf '%s' "$input" | jq -r 'try (.session_id // empty | select(type == "string")) catch empty' 2>/dev/null || true; printf '.')
+session_id="${session_id%.}"; session_id="${session_id%$'\n'}"
 observe_attribution
 
 if [[ -z "$agent" ]]; then
@@ -289,10 +296,10 @@ case "$agent" in
       if [[ "$launcher" != playwright || "$subcommand" != test ]]; then
         block "[bash-hook] BLOCKED: invalid snapshot command launcher (rule:approval-command)." "approval-command"
       fi
-      sec_consume_approval "$APPROVAL_DIR" snapshots "$APPROVAL_MAX_AGE_SEC" ||
+      sec_consume_approval "$APPROVAL_DIR" snapshots "$APPROVAL_MAX_AGE_SEC" "$session_id" "$FLEET_ROOT_FOR_APPROVAL" ||
         block "[bash-hook] BLOCKED: --update-snapshots needs orchestrator approval file hooks/approvals/snapshots (max ${APPROVAL_MAX_AGE_SEC}s, one-shot)." "approval-required"
     elif [[ "$launcher" == playwright && "$subcommand" == install ]]; then
-      sec_consume_approval "$APPROVAL_DIR" with-deps "$APPROVAL_MAX_AGE_SEC" ||
+      sec_consume_approval "$APPROVAL_DIR" with-deps "$APPROVAL_MAX_AGE_SEC" "$session_id" "$FLEET_ROOT_FOR_APPROVAL" ||
         block "[bash-hook] BLOCKED: playwright install --with-deps needs orchestrator approval file hooks/approvals/with-deps (max ${APPROVAL_MAX_AGE_SEC}s, one-shot)." "approval-required"
     fi
     ;;
