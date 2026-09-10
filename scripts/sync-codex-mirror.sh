@@ -29,26 +29,9 @@ if [[ ! -d "$MIRROR_DIR" ]]; then
   mkdir -p "$MIRROR_DIR" || { echo "sync-codex-mirror: cannot create $MIRROR_DIR" >&2; exit 2; }
 fi
 
-stale=0 written=0
-while IFS='|' read -r name _tools _model _statuses _flag; do
-  case "$name" in ''|\#*) continue ;; esac
-  src="$FLEET_ROOT/$name.md"
-  dst="$MIRROR_DIR/$name.toml"
-  [[ -f "$src" ]] || { echo "sync-codex-mirror: missing source $src" >&2; exit 2; }
-
-  if [[ "$CHECK_ONLY" -eq 1 ]]; then
-    if [[ ! -f "$dst" || "$dst" -ot "$src" ]]; then
-      echo "STALE  $name  ($dst is older than $src)"
-      stale=$((stale + 1))
-    fi
-    continue
-  fi
-
-  if [[ -f "$dst" && ! "$dst" -ot "$src" ]]; then
-    continue
-  fi
-
-  python3 - "$src" "$dst" "$name" <<'PY' || { echo "sync-codex-mirror: failed to render $name" >&2; exit 2; }
+render_mirror() {
+  # $1 source .md, $2 destination .toml, $3 agent name
+  python3 - "$1" "$2" "$3" <<'PY'
 import sys, re, os
 src, dst, name = sys.argv[1], sys.argv[2], sys.argv[3]
 text = open(src, encoding="utf-8").read()
@@ -67,22 +50,62 @@ else:
     dm = re.search(r"^description:\s*(.+)$", fm, re.M)
     desc = dm.group(1).strip() if dm else ""
 
-# TOML basic multi-line strings process escapes, so backslashes and any embedded
-# delimiter must be escaped or the mirror silently differs from the source.
-def toml_ml(s):
-    s = s.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
-    return s
+# TOML LITERAL multi-line strings ('\'\'\'') process no escapes at all, which is what
+# agent bodies need: they contain backslash sequences such as \\n inside example
+# prompts, and a basic ("""...""") string would require escaping them — silently
+# changing the text the agent actually receives. Fall back to a basic string only when
+# the content itself contains the literal delimiter.
+def emit(value):
+    if "'" * 3 not in value and not value.endswith("'"):
+        return "'" * 3 + "\n" + value + "\n" + "'" * 3
+    escaped = value.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
+    return '"""\n' + escaped + '\n"""'
 
 out = (
     f'name = "{name}"\n'
-    f'description = """\n{toml_ml(desc)}\n"""\n\n'
-    f'developer_instructions = """\n{toml_ml(body)}\n"""\n'
+    f'description = {emit(desc)}\n\n'
+    f'developer_instructions = {emit(body)}\n'
 )
 tmp = dst + ".tmp"
 with open(tmp, "w", encoding="utf-8") as f:
     f.write(out)
 os.replace(tmp, dst)
 PY
+}
+
+mirror_current() {
+  local src_f="$1" dst_f="$2" name_f="$3" tmp rc
+  [[ -f "$dst_f" ]] || return 1
+  tmp="$(mktemp)" || return 1
+  if ! render_mirror "$src_f" "$tmp" "$name_f" 2>/dev/null; then rm -f "$tmp"; return 1; fi
+  cmp -s "$tmp" "$dst_f"; rc=$?
+  rm -f "$tmp"
+  return $rc
+}
+
+stale=0 written=0
+while IFS='|' read -r name _tools _model _statuses _flag; do
+  case "$name" in ''|\#*) continue ;; esac
+  src="$FLEET_ROOT/$name.md"
+  dst="$MIRROR_DIR/$name.toml"
+  [[ -f "$src" ]] || { echo "sync-codex-mirror: missing source $src" >&2; exit 2; }
+
+  # Compare CONTENT, not mtime: a test that edits a definition and restores it bumps
+  # the mtime without changing a byte, and an mtime-only check then calls a mirror
+  # stale when it is byte-identical to what would be generated.
+  if [[ "$CHECK_ONLY" -eq 1 ]]; then
+    if ! mirror_current "$src" "$dst" "$name"; then
+      echo "STALE  $name  ($dst differs from what $src would generate)"
+      stale=$((stale + 1))
+    fi
+    continue
+  fi
+
+  if mirror_current "$src" "$dst" "$name"; then
+    continue
+  fi
+
+  render_mirror "$src" "$dst" "$name" || { echo "sync-codex-mirror: failed to render $name" >&2; exit 2; }
   echo "wrote  $name"
   written=$((written + 1))
 done < "$CONTRACT"

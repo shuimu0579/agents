@@ -105,6 +105,6 @@ _critical_thinking (inquiry) is independent of the merge pipeline; hand off to t
 
 ## Mutator mutex
 
-- Repo mutator: `e2e-runner` (Read, Write, Edit, Bash, Grep, Glob). Only one **repo** mutator instance runs at a time.
+- Repo mutator: `e2e-runner` (Read, Write, Edit, Grep, Glob — no Bash since ADR 0002; it authors specs, the orchestrator runs them). Only one **repo** mutator instance runs at a time.
 - Sandbox mutator: `_xixi` (Read, Grep, Glob, Write) — Write only to `/tmp/xixi-prompt-<8-alnum>`; may run in parallel with review-only agents.
 - Review-only agents (`architect`, `code-reviewer`, `security-reviewer`, `_critical_thinking`) may run in parallel with each other and with at most one `e2e-runner`.

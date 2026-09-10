@@ -55,7 +55,7 @@ Do not commit *Beyond Feelings* (or any copyrighted book) into this repo. Distil
 
 ## Run
 
-There is no build or compile step. Agents auto-load when this directory is `~/.claude/agents/` or is symlinked there. Verify changes with the commands under Testing & CI.
+Claude Code auto-loads `*.md` when this directory is `~/.claude/agents/` or is symlinked there — for it there is no build step. Codex does **not** read those files; it loads a generated `~/.codex/agents/*.toml` mirror, which is a real build artifact (ADR 0004). Run `bash scripts/sync-codex-mirror.sh` after any agent `.md` change, and `--check` in preflight. Verify other changes with the commands under Testing & CI.
 
 ## Testing & CI
 

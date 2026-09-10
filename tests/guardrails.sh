@@ -29,6 +29,12 @@ AGENTS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 AGENT_CONTRACT_FILE="$SCRIPT_DIR/fixtures/agent-contract.tsv"
 OUTPUT_CONTRACT_FIXTURE="$SCRIPT_DIR/fixtures/output-contract.md"
 REPO_OUTPUT_CONTRACT="$AGENTS_DIR/docs/agent-output-contract.md"
+# The installed copy, checked only when it is genuinely a DIFFERENT file. In the
+# documented canonical layout this repo IS ~/.claude/agents, so the default path
+# resolves to the checked-out contract itself: comparing them was a self-comparison
+# that could never fail, while a separate clone alongside an older install turned it
+# into a failure about a file outside the tree. The repo-vs-fixture check above is the
+# one that carries the coverage.
 LIVE_OUTPUT_CONTRACT="${OUTPUT_CONTRACT:-$HOME/.claude/agents/docs/agent-output-contract.md}"
 STRICT=0
 for arg in "$@"; do [[ "$arg" == "--strict" ]] && STRICT=1; done
@@ -381,7 +387,25 @@ else
   else
     fail "fleet: checked-out output contract drifted from tests/fixtures/output-contract.md"
   fi
+  # The contract's Mutator mutex section restates tool sets in prose. Column 2 of the
+  # fleet contract is authoritative; without this comparison the two drift silently —
+  # the doc carried `Bash` for e2e-runner for a full branch after ADR 0002 revoked it,
+  # and every other check passed.
+  while IFS='|' read -r name exp_tools _model _domain _flag; do
+    [[ -z "$name" ]] && continue
+    _line="$(grep -F "\`$name\` (" "$OUTPUT_CONTRACT_FIXTURE" | head -1 || true)"
+    [[ -z "$_line" ]] && continue          # not every agent is named with a tool list
+    _doc_tools="$(printf '%s' "$_line" | sed -n 's/.*`'"$name"'` (\([^)]*\)).*/\1/p')"
+    _doc_tools="${_doc_tools%% —*}"        # allow a trailing " — note" clause
+    if tools_equal "$_doc_tools" "$exp_tools"; then
+      note "fleet: output contract tool list matches contract for $name"
+    else
+      fail "fleet: output contract lists [$_doc_tools] for $name; fleet contract says [$exp_tools]"
+    fi
+  done <<< "$CONTRACT"
+
   while IFS='|' read -r name _tools _model domain_statuses _flag; do
+    [[ -z "$name" ]] && continue
     IFS=';' read -ra toks <<< "$domain_statuses"
     for t in "${toks[@]}"; do
       # Accept bare or backtick-wrapped domain tokens (live contract uses `TOKEN`).
@@ -393,12 +417,18 @@ else
       fi
     done
   done <<< "$CONTRACT"
-  if [[ -f "$LIVE_OUTPUT_CONTRACT" ]]; then
+  # Only meaningful when the installed copy is genuinely a DIFFERENT file. In the
+  # canonical layout this repo IS ~/.claude/agents, so the default path resolves to the
+  # checked-out contract itself and this became a self-comparison that could never
+  # fail. The repo-vs-fixture check above is the one that carries the coverage.
+  if [[ -f "$LIVE_OUTPUT_CONTRACT" ]] && ! [[ "$LIVE_OUTPUT_CONTRACT" -ef "$REPO_OUTPUT_CONTRACT" ]]; then
     if cmp -s "$OUTPUT_CONTRACT_FIXTURE" "$LIVE_OUTPUT_CONTRACT"; then
       note "fleet: installed output contract == vendored fixture"
     else
       fail "fleet: installed output contract drifted from tests/fixtures/output-contract.md"
     fi
+  elif [[ -f "$LIVE_OUTPUT_CONTRACT" ]]; then
+    note "fleet: installed output contract is the checked-out file; repo-vs-fixture check covers it"
   else
     note "fleet: installed output contract absent; checked-out contract validated against fixture"
   fi

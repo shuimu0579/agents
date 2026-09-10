@@ -56,5 +56,14 @@ preflight and post-edit step, listed under Prerequisites in `AGENTS.md`.
 * `bash scripts/sync-codex-mirror.sh --check` reports `all mirrors current`
 * Regenerated mirrors parse as TOML and carry the post-ADR-0002 bodies: `base-url`
   appears 0 times in `e2e-runner.toml`, and both reviewers carry their evidence gates
-* The generator escapes backslashes and `"""` so a rendered body cannot silently differ
-  from its source
+* Bodies are emitted as TOML **literal** multi-line strings, which process no escapes.
+  Agent bodies contain backslash sequences inside example prompts; a basic string would
+  require escaping them and silently change the text the agent receives. Verified: all
+  six `developer_instructions` are byte-identical to their source bodies
+* The generator does **not** rewrite `~/.claude/agents/...` to `~/.Codex/agents/...`, which
+  whatever produced the pre-existing mirrors did. That rewrite pointed at paths that do
+  not exist — `~/.codex/agents/` holds only the mirrors, not `docs/` or `templates/` —
+  so the referenced files were unreachable from a Codex session
+* `--check` compares CONTENT, not mtime. A test that edits a definition and restores it
+  bumps the mtime without changing a byte, and an mtime check then reports a mirror as
+  stale when it is identical to what would be generated
