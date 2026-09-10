@@ -5,7 +5,6 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
-STRICT=1
 
 echo "================================================================================"
 echo "          CLAUDE CODE AGENT FLEET — UNIFIED TEST SUITE RUNNER"
@@ -17,11 +16,15 @@ TOTAL_SUITES=0
 PASSED_SUITES=0
 FAILED_SUITES=0
 
+# Takes the command as separate arguments and runs it directly. `eval` on a single
+# string was never needed here — every call site passes a fixed command — and it made
+# a suite name or path containing a space or quote a shell-injection surface.
 run_suite() {
-  local name="$1" cmd="$2"
+  local name="$1"
+  shift
   TOTAL_SUITES=$((TOTAL_SUITES + 1))
   echo ">>> [SUITE $TOTAL_SUITES] $name"
-  if eval "$cmd"; then
+  if "$@"; then
     PASSED_SUITES=$((PASSED_SUITES + 1))
     echo ">>> [PASS] $name"
   else
@@ -49,12 +52,12 @@ if [[ -z "${SETTINGS:-}" ]]; then
   fi
 fi
 
-run_suite "Guardrails (Strict Mode)" "bash tests/guardrails.sh --strict"
-run_suite "Bash Mutator Gate Tests (hooks.test.sh)" "bash tests/hooks.test.sh"
-run_suite "Xixi Write Sandbox & Clipboard Tests (xixi-hooks.test.sh)" "bash tests/xixi-hooks.test.sh"
-run_suite "Hook Registration & E2E Tests (hook-e2e.test.sh)" "bash tests/hook-e2e.test.sh"
-run_suite "P1 Bypass Probes (p1-bypass.test.sh)" "bash tests/p1-bypass.test.sh"
-run_suite "P3 Lib Hardening Probes (p3-lib-hardening.test.sh)" "bash tests/p3-lib-hardening.test.sh"
+run_suite "Guardrails (Strict Mode)" bash tests/guardrails.sh --strict
+run_suite "Bash Mutator Gate Tests (hooks.test.sh)" bash tests/hooks.test.sh
+run_suite "Xixi Write Sandbox & Clipboard Tests (xixi-hooks.test.sh)" bash tests/xixi-hooks.test.sh
+run_suite "Hook Registration & E2E Tests (hook-e2e.test.sh)" bash tests/hook-e2e.test.sh
+run_suite "P1 Bypass Probes (p1-bypass.test.sh)" bash tests/p1-bypass.test.sh
+run_suite "P3 Lib Hardening Probes (p3-lib-hardening.test.sh)" bash tests/p3-lib-hardening.test.sh
 
 echo
 echo "================================================================================"

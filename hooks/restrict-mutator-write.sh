@@ -24,12 +24,23 @@ canon_path() {
   python3 -c 'import os,sys; print(os.path.realpath(os.path.normpath(os.path.expanduser(sys.argv[1]))))' "$1"
 }
 
+# One python3 start costs ~70ms and this hook is on the PreToolUse hot path, paid by
+# every Write/Edit. Canonicalizing each path separately meant five interpreter starts
+# per decision (~350ms measured). canon_batch resolves them all in a single process;
+# results come back one per line, in argument order (audit #34).
+canon_batch() {
+  python3 -c '
+import os, sys
+for a in sys.argv[1:]:
+    try:
+        print(os.path.realpath(os.path.normpath(os.path.expanduser(a))))
+    except Exception:
+        print("")
+' "$@"
+}
+
 FLEET_ROOT="$(cd "${HOOKS_DIR}/.." && pwd -P)"
 CLAUDE_HOME="${CLAUDE_CONFIG_DIR:-${HOME}/.claude}"
-if command -v python3 >/dev/null 2>&1; then
-  _fr="$(canon_path "${HOOKS_DIR}/..")" && [[ -n "$_fr" ]] && FLEET_ROOT="$_fr"
-  _ch="$(canon_path "${CLAUDE_CONFIG_DIR:-${HOME}/.claude}")" && [[ -n "$_ch" ]] && CLAUDE_HOME="$_ch"
-fi
 
 block() {
   local reason="$1"
@@ -109,13 +120,33 @@ lexical_norm() {
   if [[ ${#out[@]} -eq 0 ]]; then printf '/'; else printf '/%s' "${out[@]}"; fi
 }
 
-_norm_ok=0
-if command -v python3 >/dev/null 2>&1; then
-  _canon="$(canon_path "$resolved")"
-  _canon_rc=$?
-  if [[ "$_canon_rc" -eq 0 && -n "$_canon" ]]; then
-    resolved="$_canon"; _norm_ok=1
+if command -v python3 >/dev/null 2>&1; then _HAVE_PYTHON3=1; else _HAVE_PYTHON3=0; fi
+
+# Resolve every path this decision can need in ONE interpreter start: the two roots,
+# the target itself, and the two live settings files the self-protection list checks.
+_CANON_SETTINGS_1="${CLAUDE_HOME}/settings.json"
+_CANON_SETTINGS_2="${CLAUDE_HOME}/settings.local.json"
+_CANON_TARGET=""
+if [[ "$_HAVE_PYTHON3" -eq 1 ]]; then
+  _canon_out="$(canon_batch \
+    "${HOOKS_DIR}/.." \
+    "${CLAUDE_CONFIG_DIR:-${HOME}/.claude}" \
+    "$resolved" \
+    "${CLAUDE_HOME}/settings.json" \
+    "${CLAUDE_HOME}/settings.local.json" 2>/dev/null || true)"
+  if [[ -n "$_canon_out" ]]; then
+    IFS=$'\n' read -r -d '' -a _canon_arr < <(printf '%s\0' "$_canon_out") || true
+    [[ -n "${_canon_arr[0]:-}" ]] && FLEET_ROOT="${_canon_arr[0]}"
+    [[ -n "${_canon_arr[1]:-}" ]] && CLAUDE_HOME="${_canon_arr[1]}"
+    _CANON_TARGET="${_canon_arr[2]:-}"
+    [[ -n "${_canon_arr[3]:-}" ]] && _CANON_SETTINGS_1="${_canon_arr[3]}"
+    [[ -n "${_canon_arr[4]:-}" ]] && _CANON_SETTINGS_2="${_canon_arr[4]}"
   fi
+fi
+
+_norm_ok=0
+if [[ -n "$_CANON_TARGET" ]]; then
+  resolved="$_CANON_TARGET"; _norm_ok=1
 fi
 if [[ "$_norm_ok" -eq 0 ]]; then
   _lex="$(lexical_norm "$resolved" 2>/dev/null || true)"
@@ -133,16 +164,33 @@ if [[ "$_norm_ok" -eq 0 ]]; then
   block "[write-hook] BLOCKED: cannot normalize path; approval protection cannot be evaluated (rule:approvals)."
 fi
 
+# Resolve the platform and the case-folded fleet root ONCE. This hook is on the
+# PreToolUse hot path: every Write/Edit pays it, and the audit measured a median of
+# ~872ms per decision, largely from re-forking `uname` and `tr` per protected prefix
+# (audit #34). Bash string ops replace the `tr` pipeline entirely.
+if [[ "${_IS_DARWIN_CACHED:-}" != "1" ]]; then
+  if [[ "$(uname -s)" == Darwin ]]; then _IS_DARWIN=1; else _IS_DARWIN=0; fi
+  _IS_DARWIN_CACHED=1
+fi
+
+# Case-fold with Bash parameter expansion (4.0+) or `tr` as a fallback for bash 3.2,
+# which is what macOS ships as /bin/bash.
+casefold() {
+  if [[ "$_IS_DARWIN" -ne 1 ]]; then printf '%s' "$1"; return 0; fi
+  if [[ "${BASH_VERSINFO[0]:-3}" -ge 4 ]]; then
+    printf '%s' "${1,,}"
+  else
+    printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+  fi
+}
+
+_FLEET_ROOT_CF="$(casefold "$FLEET_ROOT")"
+
 # Darwin APFS is case-insensitive; string compare after realpath is not enough.
 path_matches() {
   local p="$1" prefix="$2" pc pr
-  if [[ "$(uname -s)" == Darwin ]]; then
-    pc=$(printf '%s' "$p" | tr '[:upper:]' '[:lower:]')
-    pr=$(printf '%s' "$prefix" | tr '[:upper:]' '[:lower:]')
-  else
-    pc="$p"
-    pr="$prefix"
-  fi
+  pc="$(casefold "$p")"
+  pr="$(casefold "$prefix")"
   [[ "$pc" == "$pr" || "$pc" == "$pr"/* ]]
 }
 
@@ -155,14 +203,13 @@ is_protected() {
     */hooks/approvals|*/hooks/approvals/*) return 0 ;;
   esac
   # Case-folded copy for the glob (macOS: Hooks/ vs hooks/).
-  local p_cf="$p"
-  [[ "$(uname -s)" == Darwin ]] && p_cf=$(printf '%s' "$p" | tr '[:upper:]' '[:lower:]')
+  local p_cf
+  p_cf="$(casefold "$p")"
   case "$p_cf" in
     */hooks/approvals|*/hooks/approvals/*) return 0 ;;
   esac
   if [[ -n "$agent" ]]; then
-    local fleet_root_cf="$FLEET_ROOT"
-    [[ "$(uname -s)" == Darwin ]] && fleet_root_cf=$(printf '%s' "$FLEET_ROOT" | tr '[:upper:]' '[:lower:]')
+    local fleet_root_cf="$_FLEET_ROOT_CF"
     case "$p_cf" in
       "${fleet_root_cf}/"*.md) return 0 ;;
     esac
@@ -183,10 +230,7 @@ is_protected() {
     # .git/hooks runs on ordinary git operations.
     path_matches "$p" "${FLEET_ROOT}/.git" && return 0
     local settings_real
-    for settings_real in "${CLAUDE_HOME}/settings.json" "${CLAUDE_HOME}/settings.local.json"; do
-      if command -v python3 >/dev/null 2>&1; then
-        settings_real="$(canon_path "$settings_real" 2>/dev/null || printf '%s' "$settings_real")"
-      fi
+    for settings_real in "$_CANON_SETTINGS_1" "$_CANON_SETTINGS_2"; do
       path_matches "$p" "$settings_real" && return 0
     done
   fi

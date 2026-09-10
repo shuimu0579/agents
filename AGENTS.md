@@ -18,6 +18,24 @@ registration to be present.
 | Codex + a current `~/.codex/agents/*.toml` mirror | Codex-side dispatch | Codex runs a stale agent definition |
 | Playwright (optional) | `e2e-runner` templates | the **orchestrator** runs it; the agent has no execution (ADR 0002) |
 
+### Accepted dependency risk: the Codex MCP server
+
+`.codex/config.toml` launches the Claude Code bridge with `npx -y claude-octopus@<version>`.
+The version is pinned exactly, but `npx` fetches at run time and gives no integrity
+pinning for the package or its transitive dependencies, and `-y` installs without
+prompting (audit #35).
+
+This is **not** fixed by hand-editing the file. `cc-suite:update` owns that entry — it
+re-renders the cc-suite-managed parts of `.codex/config.toml` and re-pins
+claude-octopus — so a local edit pointing at a lockfile-installed binary is reverted the
+next time that command runs. A durable fix belongs upstream in cc-suite, as a lockfile
+plus an explicit local executable path.
+
+What holds today: the exact version pin, and `cc-suite:update` verifying that the pin
+actually boots and speaks MCP before use. What does not: any guarantee about the
+transitive dependency tree. Treat a Codex session's MCP bridge as running third-party
+code fetched at launch.
+
 ### Preflight
 
 ```bash

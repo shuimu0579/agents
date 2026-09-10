@@ -82,6 +82,10 @@ if ! reserve_xixi_path "$file_path"; then
   deny "[xixi-hook] BLOCKED: could not exclusively create target (race or exists). Pick a new 8-char id."
 fi
 
+# Deliberately kept despite overlapping reserve_xixi_path (audit #49). The two calls
+# are adjacent, so this is a post-condition assertion rather than a race check — but it
+# costs one interpreter start on a path taken only for _xixi Writes, and dropping a
+# validation from a write sandbox to save that is a bad trade. Not hot-path code.
 if ! assert_reserved_xixi_file "$file_path"; then
   deny "[xixi-hook] BLOCKED: reserved target failed ownership/link validation; refusing Write."
 fi
