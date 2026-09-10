@@ -88,6 +88,8 @@ path, copy_script, max_bytes = sys.argv[1], sys.argv[2], int(sys.argv[3])
 flags = os.O_RDONLY
 if hasattr(os, "O_NOFOLLOW"):
     flags |= os.O_NOFOLLOW
+if hasattr(os, "O_NONBLOCK"):
+    flags |= os.O_NONBLOCK
 
 try:
     fd = os.open(path, flags)
@@ -145,10 +147,8 @@ PY
   [ "$size" -gt "$max_bytes" ] && { rm -f -- "$p" 2>/dev/null || true; return 14; }
   [ -x "$copy_script" ] || { rm -f -- "$p" 2>/dev/null || true; return 15; }
 
-  if "$copy_script" < "$p"; then
-    rm -f -- "$p" 2>/dev/null || true
-    return 0
-  fi
+  # Safe backend (python3) unavailable: refuse degraded copy to preserve
+  # single-descriptor guarantee; return manual-copy fallback status (16).
   rm -f -- "$p" 2>/dev/null || true
   return 16
 }

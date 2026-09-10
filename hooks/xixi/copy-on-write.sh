@@ -36,6 +36,22 @@ raw_payload_mentions_xixi_path() {
   printf '%s' "$input" | grep -qE '"file_path"[[:space:]]*:[[:space:]]*"/tmp/xixi-prompt-[A-Za-z0-9]{8}"'
 }
 
+# Remove the delivered temp file on a failure path, WITHOUT depending on common.sh
+# (which may be missing or incomplete on exactly these paths). The pattern is the
+# _xixi sandbox and nothing else: /tmp/xixi-prompt-<8 alnum>, no traversal, no
+# newline, not a symlink. A refined prompt left in /tmp after a failed delivery is
+# an avoidable leak — the fallback contract has the agent paste it into chat, so
+# nothing downstream needs the file.
+discard_xixi_temp() {
+  local p
+  p="$(printf '%s' "$input" | sed -n 's/.*"file_path"[[:space:]]*:[[:space:]]*"\(\/tmp\/xixi-prompt-[A-Za-z0-9]\{8\}\)".*/\1/p' | head -1)"
+  [ -n "$p" ] || return 0
+  case "$p" in *..*|*$'\n'*|*$'\r'*) return 0 ;; esac
+  [ -L "$p" ] && return 0
+  [ -f "$p" ] || return 0
+  rm -f -- "$p" 2>/dev/null || true
+}
+
 emit_clipboard_warning() {
   local detail="$1"
   emit_status "[xixi-hook] ⚠️ ${detail}. Paste the full refined prompt into chat as fallback, then tell the user ⚠️ 剪贴板复制失败，上方为完整 prompt，请手动复制"
@@ -45,6 +61,7 @@ if [[ ! -r "${XIXI_DIR}/common.sh" ]]; then
   if raw_payload_names_xixi; then
     emit_clipboard_warning "clipboard copy unavailable: common.sh missing"
   fi
+  discard_xixi_temp
   exit 0
 fi
 # shellcheck source=common.sh
@@ -52,6 +69,7 @@ if ! source "${XIXI_DIR}/common.sh"; then
   if raw_payload_names_xixi; then
     emit_clipboard_warning "clipboard copy unavailable: failed to source common.sh"
   fi
+  discard_xixi_temp
   exit 0
 fi
 for fn in is_xixi_agent is_allowed_xixi_path; do
@@ -59,6 +77,7 @@ for fn in is_xixi_agent is_allowed_xixi_path; do
     if raw_payload_names_xixi; then
       emit_clipboard_warning "clipboard copy unavailable: common.sh helper ${fn} missing"
     fi
+    discard_xixi_temp
     exit 0
   fi
 done
@@ -67,6 +86,7 @@ if ! command -v jq >/dev/null 2>&1; then
   if raw_payload_names_xixi && raw_payload_mentions_xixi_path; then
     emit_clipboard_warning "clipboard copy unavailable: jq missing so _xixi hook attribution could not be verified"
   fi
+  discard_xixi_temp
   exit 0
 fi
 
@@ -74,6 +94,18 @@ if ! printf '%s' "$input" | jq -e . >/dev/null 2>&1; then
   if raw_payload_names_xixi && raw_payload_mentions_xixi_path; then
     emit_clipboard_warning "clipboard copy unavailable: malformed JSON prevented _xixi hook attribution"
   fi
+  discard_xixi_temp
+  exit 0
+fi
+
+# `jq -e .` accepts any truthy JSON, so an array or string passes here and then the
+# field extraction below fails — which, under `set -e`, exits non-zero from a
+# PostToolUse hook instead of returning a status. Require an event object.
+if ! printf '%s' "$input" | jq -e 'type == "object"' >/dev/null 2>&1; then
+  if raw_payload_mentions_xixi_path; then
+    emit_clipboard_warning "clipboard copy unavailable: payload is not a JSON object so _xixi hook attribution could not be verified"
+  fi
+  discard_xixi_temp
   exit 0
 fi
 
@@ -124,6 +156,9 @@ case "$rc" in
     ;;
   15)
     emit_status "[xixi-hook] ⚠️ clipboard copy failed (copy-prompt.sh missing). Paste the full refined prompt into chat as fallback, then tell the user ⚠️ 剪贴板复制失败，上方为完整 prompt，请手动复制"
+    ;;
+  16)
+    emit_status "[xixi-hook] ⚠️ refused: python3 unavailable, so the single-descriptor read that guards this copy cannot run (audit #23). Install python3 to restore clipboard delivery. Paste the full refined prompt into chat as fallback, then tell the user ⚠️ 剪贴板复制失败，上方为完整 prompt，请手动复制"
     ;;
   *)
     emit_status "[xixi-hook] ⚠️ clipboard copy failed. Paste the full refined prompt into chat as fallback, then tell the user ⚠️ 剪贴板复制失败，上方为完整 prompt，请手动复制"

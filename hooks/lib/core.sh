@@ -15,9 +15,11 @@ hook_observe_attribution() {
 # Log an audit decision: <epoch> agent_type=<agent> rule=<rule> decision=<decision>
 hook_audit_log() {
   local log_file="$1" agent="${2:-<absent>}" rule="$3" decision="$4" epoch
+  [[ -z "$log_file" || -L "$log_file" ]] && return 0
   agent="${agent//$'\n'/ }"
   agent="${agent//$'\r'/ }"
   (
+    [ -L "$log_file" ] && exit 0
     epoch=$(date +%s 2>/dev/null || printf '0')
     printf '%s agent_type=%s rule=%s decision=%s\n' \
       "$epoch" "$agent" "$rule" "$decision" >> "$log_file"

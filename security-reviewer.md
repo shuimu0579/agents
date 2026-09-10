@@ -141,7 +141,7 @@ Severity scale, canonical `Verdict`, and report skeleton follow `~/.claude/agent
 **Verdict:** GO | BLOCK | NEEDS_INPUT
 ```
 
-**Zero findings:** still emit Summary (all zeros), Scans, Checklist, `**Domain status:** APPROVE`, `Verdict: GO`, bound to the scope identifier. Never invent findings to fill the template (grill F23).
+**Zero findings:** emit Summary (all zeros), Scans, Checklist, `**Domain status:** APPROVE`, `Verdict: GO`, bound to the scope identifier — **but evidence gaps outrank a zero-finding result**. Any control still marked `UNKNOWN / NOT EVIDENCED` that is material to the verdict makes it `NEEDS_INPUT`, naming the control and what would settle it. An unexamined control is not a passed control. Never invent findings to fill the template (grill F23).
 
 **Map:** APPROVE→GO · APPROVE WITH CHANGES→NEEDS_INPUT · BLOCK→BLOCK. A CRITICAL finding is never overridden by agent APPROVE alone — human sign-off required (grill F24).
 

@@ -28,6 +28,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENTS_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 AGENT_CONTRACT_FILE="$SCRIPT_DIR/fixtures/agent-contract.tsv"
 OUTPUT_CONTRACT_FIXTURE="$SCRIPT_DIR/fixtures/output-contract.md"
+REPO_OUTPUT_CONTRACT="$AGENTS_DIR/docs/agent-output-contract.md"
 LIVE_OUTPUT_CONTRACT="${OUTPUT_CONTRACT:-$HOME/.claude/agents/docs/agent-output-contract.md}"
 STRICT=0
 for arg in "$@"; do [[ "$arg" == "--strict" ]] && STRICT=1; done
@@ -42,10 +43,44 @@ fail() { FAILS=$((FAILS + 1)); LINES_OUT+=("FAIL  $1"); }
 warn() { WARNS=$((WARNS + 1)); LINES_OUT+=("WARN  $1"); }
 note() { LINES_OUT+=("ok    $1"); }
 
-# get_field <file> <field> -> prints value of `^field:` (first match); empty if absent.
-# `|| true` keeps this set -e safe when grep finds no match.
+# frontmatter_block <file> -> only the leading, delimited YAML block.
+frontmatter_block() {
+  awk '
+    { sub(/\r$/, "") }
+    NR == 1 { if ($0 != "---") exit 1; next }
+    /^---[[:space:]]*$/ { closed = 1; exit }
+    { print }
+    END { if (!closed) exit 1 }
+  ' "$1"
+}
+
+# Validate the fleet header format without adding a YAML dependency. Top-level
+# keys are plain identifiers; only description supports indented scalar content.
+# Reject unsupported syntax rather than let a YAML loader reinterpret authority.
+frontmatter_valid() {
+  awk '
+    /^[[:space:]]*(#|$)/ { next }
+    /^[[:space:]]/ {
+      if (key != "description") {
+        print "unsupported indented frontmatter outside description"; bad = 1
+      }
+      next
+    }
+    /^[A-Za-z_][A-Za-z0-9_-]*:([[:space:]]|$)/ {
+      key = $0; sub(/:.*/, "", key)
+      if (seen[key]++) { print "duplicate frontmatter key: " key; bad = 1 }
+      next
+    }
+    { print "unsupported frontmatter syntax at header line " NR; bad = 1 }
+    END { exit bad ? 1 : 0 }
+  '
+}
+
+# get_field <validated-block> <field> -> scalar value; never reads the body.
 get_field() {
-  grep -m1 "^$2:" "$1" | sed "s/^$2:[[:space:]]*//" || true
+  awk -v key="$2" 'index($0, key ":") == 1 {
+    sub(/^[^:]*:[[:space:]]*/, ""); print; exit
+  }' <<< "$1"
 }
 
 # has_tool <tools_str> <tool> -> 0 if tool present
@@ -113,17 +148,25 @@ while IFS='|' read -r name exp_tools exp_model domain_statuses flag; do
 
   if [[ ! -f "$f" ]]; then fail "$f: contract row '$name' but file missing"; continue; fi
 
-  actual_name="$(get_field "$f" name)"
-  actual_tools="$(get_field "$f" tools)"
-  actual_model="$(get_field "$f" model)"
+  if ! frontmatter="$(frontmatter_block "$f")"; then
+    fail "$f: missing leading --- frontmatter block or closing delimiter"
+    continue
+  fi
+  if ! frontmatter_error="$(frontmatter_valid <<< "$frontmatter")"; then
+    fail "$f: $frontmatter_error"
+    continue
+  fi
+  actual_name="$(get_field "$frontmatter" name)"
+  actual_tools="$(get_field "$frontmatter" tools)"
+  actual_model="$(get_field "$frontmatter" model)"
 
   # 1. frontmatter fields present
   # name + description: required; tools + model: optional per official schema (N7)
   for field in name description; do
-    val="$(get_field "$f" "$field")"
+    val="$(get_field "$frontmatter" "$field")"
     if [[ -z "$val" ]]; then fail "$f: missing required frontmatter field '$field'"; fi
   done
-  if grep -qE '^tools:[[:space:]]*$' "$f"; then
+  if grep -qE '^tools:[[:space:]]*$' <<< "$frontmatter"; then
     fail "$f: YAML-block tools are unsupported; use a comma string or JSON array (fail-closed)"
   elif [[ -z "$actual_tools" ]]; then
     fail "$f: missing frontmatter field 'tools' (fleet invariant — omission inherits the parent tool pool)"
@@ -191,19 +234,30 @@ while IFS='|' read -r name exp_tools exp_model domain_statuses flag; do
   fi
 
   # 4b. canonical orchestrator Verdict (grill F14) — every agent must emit GO|BLOCK|NEEDS_INPUT vocabulary
-  if token_present "$f" "**Verdict:**"; then
-    note "$f: canonical Verdict line present"
+  # Check every report template (e.g. both critical-thinking modes), within its
+  # own code fence. Instructions following the closing fence are not template text.
+  if awk '
+    /^```/ {
+      if (fenced && $0 ~ /^```[[:space:]]*$/) {
+        fenced = 0; verdict = 0; handoff = 0
+      } else if (!fenced) {
+        fenced = 1; handoff = 0
+      } else if (verdict) { bad = 1 }
+      next
+    }
+    verdict && $0 !~ /^[[:space:]]*$/ { bad = 1 }
+    /^## Handoff([[:space:]]|$)/ { if (fenced) handoff = 1 }
+    /^\*\*Verdict:\*\*/ {
+      count++
+      if (!fenced || !handoff ||
+          $0 !~ /^\*\*Verdict:\*\* GO \| BLOCK \| NEEDS_INPUT[[:space:]]*$/) bad = 1
+      verdict = 1
+    }
+    END { exit (bad || !count || verdict) ? 1 : 0 }
+  ' "$f"; then
+    note "$f: canonical Verdict ends each template after Handoff"
   else
-    fail "$f: missing canonical **Verdict:** (bold, GO|BLOCK|NEEDS_INPUT) — see docs/agent-output-contract.md"
-  fi
-
-  # 4b2. Verdict must be the final template line, after ## Handoff (contract: final line) — D-TOKEN freeze
-  _hln="$(grep -n '^## Handoff' "$f" | head -1 | cut -d: -f1 || true)"
-  _vln="$(grep -n '^\*\*Verdict:\*\*' "$f" | head -1 | cut -d: -f1 || true)"
-  if [[ -n "$_hln" && -n "$_vln" && "$_vln" -gt "$_hln" ]]; then
-    note "$f: Verdict after Handoff (final-line contract)"
-  else
-    fail "$f: **Verdict:** must come after ## Handoff as the final template line (contract)"
+    fail "$f: each **Verdict:** must be GO | BLOCK | NEEDS_INPUT, after ## Handoff, with only blanks before its closing code fence"
   fi
 
   # 4c. reader injection preamble (grill F1) — review_only + mutator
@@ -239,21 +293,27 @@ done < <(grep -hoE 'Issue #[0-9]+; expires [0-9]{4}-[0-9]{2}-[0-9]{2}' ./*.md 2>
 # ---------------------------------------------------------------------------
 
 # Discover agent *.md vs contract table (audit: no orphan agents).
-# Mirrors Claude Code's recursive scan: any *.md with agent frontmatter (name+description)
-# outside the excluded dirs is a candidate. Reports/docs/tests/templates/hooks/archive excluded.
+# Any Markdown file with a leading agent header is a candidate, regardless of
+# directory. Ordinary documentation and embedded YAML examples are not agents.
 DISCOVERED=()
-while IFS= read -r f; do
+while IFS= read -r -d '' f; do
   base="${f#./}"; base="${base%.md}"
-  # Skip non-agent paths
-  case "$f" in
-    ./CLAUDE.md|./AGENTS.md|./archive/*|./docs/*|./tests/*|./templates/*|./scripts/*|./hooks/*|./.github/*|./.git/*|./.claude/*|./grill-report-*|./codex-*) continue ;;
-  esac
-  [[ "$base" == .* ]] && continue
-  # Only agent-like files (agent frontmatter present) count — reports/docs are not agents
-  if grep -qE '^name:' "$f" && grep -qE '^description:' "$f"; then
+  if header="$(frontmatter_block "$f")" && awk '
+    /^[[:space:]]*(#|$)/ { next }
+    {
+      match($0, /[^[:space:]]/); indent = RSTART
+      if (!minimum || indent < minimum) minimum = indent
+      if (!index($0, ":")) next
+      key = $0; sub(/^[[:space:]]*/, "", key); sub(/:.*/, "", key)
+      sub(/[[:space:]]*$/, "", key)
+      if (key == "name" || key == "\"name\"" || key == "\047name\047") names[indent] = 1
+      if (key == "description" || key == "\"description\"" || key == "\047description\047") descriptions[indent] = 1
+    }
+    END { exit (names[minimum] && descriptions[minimum]) ? 0 : 1 }
+  ' <<< "$header"; then
     DISCOVERED+=("$base")
   fi
-done < <(find . -name '*.md' -not -path './.git/*' | sort)
+done < <(find . -path './.git' -prune -o -name '*.md' -print0)
 
 CONTRACT_NAMES=()
 while IFS='|' read -r name _rest; do
@@ -314,6 +374,13 @@ if [[ ! -f "$OUTPUT_CONTRACT_FIXTURE" ]]; then
   fail "fleet: missing vendored output contract fixture"
 else
   note "fleet: vendored output contract fixture present"
+  if [[ ! -f "$REPO_OUTPUT_CONTRACT" ]]; then
+    fail "fleet: missing checked-out output contract docs/agent-output-contract.md"
+  elif cmp -s "$OUTPUT_CONTRACT_FIXTURE" "$REPO_OUTPUT_CONTRACT"; then
+    note "fleet: checked-out output contract == vendored fixture"
+  else
+    fail "fleet: checked-out output contract drifted from tests/fixtures/output-contract.md"
+  fi
   while IFS='|' read -r name _tools _model domain_statuses _flag; do
     IFS=';' read -ra toks <<< "$domain_statuses"
     for t in "${toks[@]}"; do
@@ -333,7 +400,7 @@ else
       fail "fleet: installed output contract drifted from tests/fixtures/output-contract.md"
     fi
   else
-    note "fleet: installed output contract absent; vendored fixture is CI authority"
+    note "fleet: installed output contract absent; checked-out contract validated against fixture"
   fi
 fi
 

@@ -7,6 +7,22 @@
 
 # local ui-tokenize session noise
 .tokenize/
+# approvals store (transient one-shot approval tokens)
+hooks/approvals/*
+!hooks/approvals/README.md
+
+# secrets and local environment
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Playwright artifacts and auth state (templates/playwright.config.ts.tmpl)
+test-results/
+playwright-report/
+blob-report/
+.auth/
+storageState*.json
 
 # >>> cc-suite >>>
 # cc-suite-schema: 6

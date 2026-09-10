@@ -29,32 +29,5 @@ fs_get_mtime() {
   fi
 }
 
-# Get hard link count (nlink)
-fs_get_nlink() {
-  local p="$1"
-  if [[ -n "$_IS_DARWIN" ]]; then
-    stat -f '%l' "$p" 2>/dev/null || printf '0'
-  else
-    stat -c '%h' "$p" 2>/dev/null || stat -f '%l' "$p" 2>/dev/null || printf '0'
-  fi
-}
 
-# Get file owner username
-fs_get_owner() {
-  local p="$1"
-  if [[ -n "$_IS_DARWIN" ]]; then
-    stat -f '%Su' "$p" 2>/dev/null || printf 'unknown'
-  else
-    stat -c '%U' "$p" 2>/dev/null || stat -f '%Su' "$p" 2>/dev/null || printf 'unknown'
-  fi
-}
 
-# Get file size in bytes
-fs_get_size() {
-  local p="$1"
-  if [[ -n "$_IS_DARWIN" ]]; then
-    stat -f '%z' "$p" 2>/dev/null || wc -c < "$p" 2>/dev/null | tr -d '[:space:]'
-  else
-    stat -c '%s' "$p" 2>/dev/null || stat -f '%z' "$p" 2>/dev/null || wc -c < "$p" 2>/dev/null | tr -d '[:space:]'
-  fi
-}

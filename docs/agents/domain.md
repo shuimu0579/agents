@@ -6,7 +6,7 @@ How the engineering skills should consume this repo's domain documentation when 
 
 - **`CONTEXT.md`** at the repo root, or
 - **`CONTEXT-MAP.md`** at the repo root if it exists — it points at one `CONTEXT.md` per context. Read each one relevant to the topic.
-- **`docs/adr/`** — read ADRs that touch the area you're about to work in. In multi-context repos, also check `src/<context>/docs/adr/` for context-scoped decisions.
+- **`adr/`** at the repository root — read ADRs that touch the area you're about to work in. This repo adopted the root location in `adr/0000-use-markdown-architectural-decision-records.md`; `docs/adr/` is **not** used here. In multi-context repos, also check `src/<context>/docs/adr/` for context-scoped decisions. If the directory is absent, say so in your report — do not proceed silently as though no decisions exist.
 
 If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
 

@@ -12,7 +12,7 @@ HOOK_SRC="${HOOK_SRC:-$HOME/.claude/agents/hooks/restrict-bash-by-agent.sh}"
 WRITE_HOOK_SRC="${WRITE_HOOK_SRC:-$(dirname -- "$HOOK_SRC")/restrict-mutator-write.sh}"
 SETTINGS="${SETTINGS:-$HOME/.claude/settings.json}"
 SCRIPT_DIR="$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-AGENT_CONTRACT_FILE="${AGENT_CONTRACT_FILE:-$SCRIPT_DIR/fixtures/agent-contract.tsv}"
+LIVE_CONTRACT_SRC="$SCRIPT_DIR/fixtures/agent-contract.tsv"
 
 if [ ! -f "$HOOK_SRC" ]; then
   echo "FATAL: restrict-bash-by-agent.sh not found at $HOOK_SRC" >&2
@@ -26,6 +26,14 @@ fi
 TMPD="$(mktemp -d)"
 trap 'rm -rf "$TMPD"' EXIT
 mkdir -p "$TMPD/approvals"
+TEST_HOME="$TMPD/home"
+TEST_CONFIG="$TEST_HOME/.claude"
+mkdir -p "$TEST_CONFIG"
+# Read the installation for the registration assertions, then use only its snapshot.
+cp "$SETTINGS" "$TEST_CONFIG/settings.json" || exit 2
+SETTINGS="$TEST_CONFIG/settings.json"
+LIVE_CONTRACT_FILE="$TMPD/live-contract.tsv"
+cp "$LIVE_CONTRACT_SRC" "$LIVE_CONTRACT_FILE" || exit 2
 TEST_CWD="$TMPD/cwd"
 mkdir -p "$TEST_CWD"
 BASH_HOOK="$TMPD/restrict-bash-by-agent.sh"
@@ -50,6 +58,41 @@ fi
 HOOK_ROOT="$TMPD"
 HOOK_AUDIT_LOG="$TMPD/bash-gate.audit.log"
 
+# The Bash gate derives authority from the declared tool set (ADR 0002), and no agent in
+# the live fleet declares Bash any more. The allowlist and its command parser still exist
+# and still need coverage, so derive a GATE contract that grants e2e-runner Bash again.
+# Allowlist/parser assertions run against the gate contract; fleet policy (that the live
+# contract denies Bash) is asserted separately against LIVE_CONTRACT_FILE below.
+GATE_CONTRACT_FILE="$TMPD/bash-gate-contract.tsv"
+awk -F'|' -v OFS='|' '$1=="e2e-runner"{$2="Read, Write, Edit, Bash, Grep, Glob"}1' \
+  "$LIVE_CONTRACT_FILE" > "$GATE_CONTRACT_FILE"
+if ! grep -q '^e2e-runner|Read, Write, Edit, Bash, ' "$GATE_CONTRACT_FILE"; then
+  echo "FATAL: could not derive gate contract from $LIVE_CONTRACT_FILE" >&2
+  exit 2
+fi
+AGENT_CONTRACT_FILE="$GATE_CONTRACT_FILE"
+
+# Every invocation, including raw payloads, Write/Edit and racing consumers, starts
+# clean. Per-case overrides below are literals owned by this suite, not caller state.
+HOOK_ENV=(env -i PATH="$PATH" HOME="$TEST_HOME" TMPDIR="$TMPD"
+  CLAUDE_CONFIG_DIR="$TEST_CONFIG" HOOK_LIB_DIR="$TMPD/lib"
+  APPROVAL_DIR="$TMPD/approvals" AGENT_CONTRACT_FILE="$GATE_CONTRACT_FILE"
+  HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" BASE_URL= E2E_ALLOWED_HOSTS=)
+
+# Approval tokens carry a session and repo binding since audit #21; an empty file is
+# refused. Mint them the way the orchestrator does so these tests exercise the real
+# format rather than a shape the gate no longer accepts.
+TEST_SESSION="hooks-test-session"
+mint_approval() {
+  local name="$1"
+  rm -f "$TMPD/approvals/$name" "$TMPD/approvals/$name".consuming.* 2>/dev/null || true
+  {
+    printf 'session=%s\n' "$TEST_SESSION"
+    printf 'repo=%s\n' "$(cd "$(dirname -- "$BASH_HOOK")/.." && pwd -P)"
+  } > "$TMPD/approvals/$name"
+  chmod 600 "$TMPD/approvals/$name"
+}
+
 PASS=0
 FAIL=0
 
@@ -59,8 +102,9 @@ echo "==> restrict-bash-by-agent.sh gate tests (isolated HOOK_ROOT=$HOOK_ROOT)"
 bt() {
   local desc="$1" agent="$2" cmd="$3" exp="$4" rc payload out
   shift 4
-  payload=$(jq -nc --arg a "$agent" --arg c "$cmd" '{agent_type:$a, tool_input:{command:$c}}')
-  out="$(cd "$TEST_CWD" && printf '%s' "$payload" | env AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" "$@" bash "$BASH_HOOK" 2>&1)"
+  payload=$(jq -nc --arg a "$agent" --arg c "$cmd" --arg s "$TEST_SESSION" \
+    '{session_id:$s, agent_type:$a, tool_input:{command:$c}}')
+  out="$(cd "$TEST_CWD" && printf '%s' "$payload" | "${HOOK_ENV[@]}" AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" "$@" bash "$BASH_HOOK" 2>&1)"
   rc=$?
   if [ "$rc" -eq "$exp" ]; then
     PASS=$((PASS + 1)); echo "PASS  $desc"
@@ -69,11 +113,29 @@ bt() {
   fi
 }
 
+# bt_rule <desc> <agent> <cmd> <expect-exit> <expect-rule-substring> [VAR=VAL ...]
+# Asserts WHY a command was denied, not merely that it was. Several approval tests
+# used to pass while the production guard rejected them first for a missing BASE_URL,
+# so they stayed green even with the approval logic deleted (audit #18).
+bt_rule() {
+  local desc="$1" agent="$2" cmd="$3" exp="$4" want_rule="$5" rc payload out
+  shift 5
+  payload=$(jq -nc --arg a "$agent" --arg c "$cmd" --arg s "$TEST_SESSION" \
+    '{session_id:$s, agent_type:$a, tool_input:{command:$c}}')
+  out="$(cd "$TEST_CWD" && printf '%s' "$payload" | "${HOOK_ENV[@]}" AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" "$@" bash "$BASH_HOOK" 2>&1)"
+  rc=$?
+  if [ "$rc" -eq "$exp" ] && printf '%s' "$out" | grep -q -- "$want_rule"; then
+    PASS=$((PASS + 1)); echo "PASS  $desc"
+  else
+    FAIL=$((FAIL + 1)); echo "FAIL  $desc (exit=$rc want=$exp; rule '$want_rule' not found) :: $(printf '%s' "$out" | tr '\n' ' | ')"
+  fi
+}
+
 # bt_payload <desc> <full-json-payload> <expect-exit> [VAR=VAL ...]
 bt_payload() {
   local desc="$1" payload="$2" exp="$3" rc out
   shift 3
-  out="$(cd "$TEST_CWD" && printf '%s' "$payload" | env AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" "$@" bash "$BASH_HOOK" 2>&1)"
+  out="$(cd "$TEST_CWD" && printf '%s' "$payload" | "${HOOK_ENV[@]}" AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" "$@" bash "$BASH_HOOK" 2>&1)"
   rc=$?
   if [ "$rc" -eq "$exp" ]; then
     PASS=$((PASS + 1)); echo "PASS  $desc"
@@ -92,7 +154,7 @@ real_payload='{"session_id":"real-shaped-session","transcript_path":"/tmp/transc
 main_payload='{"session_id":"main-session","transcript_path":"/tmp/transcript.jsonl","cwd":"/tmp/repo","permission_mode":"bypassPermissions","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/main-session-probe"},"tool_use_id":"toolu_main"}'
 bt_payload "real-shaped PreToolUse payload attributes e2e-runner" "$real_payload" 0 "BASE_URL=http://localhost:3000"
 bt_payload "real-shaped main payload without agent_type passes through" "$main_payload" 0
-attribution_out="$(cd "$TEST_CWD" && printf '%s' "$main_payload" | env AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" bash "$BASH_HOOK" 2>&1)"
+attribution_out="$(cd "$TEST_CWD" && printf '%s' "$main_payload" | "${HOOK_ENV[@]}" AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" bash "$BASH_HOOK" 2>&1)"
 attribution_rc=$?
 if [ "$attribution_rc" -eq 0 ] && printf '%s' "$attribution_out" | grep -qF '[bash-hook] attribution agent_type=<absent>'; then
   PASS=$((PASS + 1)); echo "PASS  missing agent_type is observable on stderr"
@@ -144,37 +206,42 @@ bt "e2e empty command block" "e2e-runner" "" 2
 
 # --- one-shot approvals (scoped; no -u borrow; expiry) ---
 bt "e2e with-deps block (no approval)" "e2e-runner" "npx --no-install playwright install --with-deps" 2
-: > "$TMPD/approvals/with-deps"
-chmod 600 "$TMPD/approvals/with-deps"
+mint_approval with-deps
 bt "e2e invalid install launcher cannot consume approval" "e2e-runner" "python3 /tmp/x.py playwright install --with-deps" 2
 bt "e2e with-deps allow (approval file)" "e2e-runner" "npx --no-install playwright install --with-deps" 0
 bt "e2e with-deps consumed (one-shot)" "e2e-runner" "npx --no-install playwright install --with-deps" 2
 bt "e2e update-snapshots block (no approval)" "e2e-runner" "playwright test --update-snapshots" 2
-: > "$TMPD/approvals/snapshots"
-chmod 600 "$TMPD/approvals/snapshots"
+mint_approval snapshots
 bt "e2e invalid snapshot launcher cannot consume approval" "e2e-runner" "python3 /tmp/x.py playwright test --update-snapshots" 2
 bt "e2e update-snapshots allow (approval file)" "e2e-runner" "playwright test --update-snapshots" 0 "BASE_URL=http://localhost:3000"
-: > "$TMPD/approvals/snapshots"
-chmod 600 "$TMPD/approvals/snapshots"
+mint_approval snapshots
 touch -t 202001010000 "$TMPD/approvals/snapshots"
-bt "e2e update-snapshots stale approval block" "e2e-runner" "playwright test --update-snapshots" 2
-: > "$TMPD/approvals/snapshots"
-chmod 600 "$TMPD/approvals/snapshots"
-bt "e2e -u cannot borrow approval (block)" "e2e-runner" "python3 -u /tmp/x.py" 2
+bt_rule "e2e update-snapshots stale approval block" "e2e-runner" "playwright test --update-snapshots" 2 "needs orchestrator approval file" "BASE_URL=http://localhost:3000"
+mint_approval snapshots
+bt_rule "e2e -u cannot borrow approval (block)" "e2e-runner" "python3 -u /tmp/x.py" 2 "rule:" "BASE_URL=http://localhost:3000"
 
-: > "$TMPD/approvals/snapshots"
+# Correctly bound but world-readable: this must fail on the MODE, not on the binding,
+# or the test stops covering the permission check.
+mint_approval snapshots
 chmod 644 "$TMPD/approvals/snapshots"
-bt "e2e approval mode must be 600" "e2e-runner" "playwright test --update-snapshots" 2
+bt_rule "e2e approval mode must be 600" "e2e-runner" "playwright test --update-snapshots" 2 "needs orchestrator approval file" "BASE_URL=http://localhost:3000"
 
 # Two concurrent consumers race for one token; exactly one can atomically claim it.
-: > "$TMPD/approvals/snapshots"
-chmod 600 "$TMPD/approvals/snapshots"
-race_payload=$(jq -nc '{agent_type:"e2e-runner",tool_input:{command:"playwright test --update-snapshots"}}')
-(cd "$TEST_CWD" && printf '%s' "$race_payload" | env AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" BASE_URL=http://localhost:3000 bash "$BASH_HOOK" >/dev/null 2>&1; echo $? > "$TMPD/race1") &
-race_pid1=$!
-(cd "$TEST_CWD" && printf '%s' "$race_payload" | env AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" BASE_URL=http://localhost:3000 bash "$BASH_HOOK" >/dev/null 2>&1; echo $? > "$TMPD/race2") &
-race_pid2=$!
-wait "$race_pid1" "$race_pid2"
+mint_approval snapshots
+race_payload=$(jq -nc --arg s "$TEST_SESSION" '{session_id:$s,agent_type:"e2e-runner",tool_input:{command:"playwright test --update-snapshots"}}')
+# Keep the test driver in the foreground; both children are joined before return.
+"${HOOK_ENV[@]}" BASE_URL=http://localhost:3000 python3 - "$TEST_CWD" "$BASH_HOOK" "$race_payload" "$TMPD" <<'RACE'
+import pathlib, subprocess, sys
+cwd, hook, payload, root = sys.argv[1:]
+children = [subprocess.Popen(["bash", hook], cwd=cwd, stdin=subprocess.PIPE,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            for _ in range(2)]
+for child in children:
+    child.stdin.write(payload.encode())
+    child.stdin.close()
+for index, child in enumerate(children, 1):
+    pathlib.Path(root, f"race{index}").write_text(str(child.wait()) + "\n")
+RACE
 race_codes="$(sort "$TMPD/race1" "$TMPD/race2" | paste -sd, -)"
 if [ "$race_codes" = "0,2" ]; then
   PASS=$((PASS + 1)); echo "PASS  approval token has exactly one atomic consumer"
@@ -243,7 +310,7 @@ bt "e2e double-quoted base-url allow" "e2e-runner" 'playwright test --base-url="
 bt "e2e single-quoted base-url allow" "e2e-runner" "playwright test --base-url='http://localhost:3000'" 0
 
 # --- malformed payload → fail closed (only when agent_type names a gated agent) ---
-out="$(printf '%s' '{"agent_type":"e2e-runner","tool_input":{' | env AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" bash "$BASH_HOOK" 2>&1)"
+out="$(printf '%s' '{"agent_type":"e2e-runner","tool_input":{' | "${HOOK_ENV[@]}" AGENT_CONTRACT_FILE="$AGENT_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" bash "$BASH_HOOK" 2>&1)"
 rc=$?
 if [ "$rc" -eq 2 ]; then
   PASS=$((PASS + 1)); echo "PASS  e2e bad JSON fail-closed"
@@ -288,7 +355,7 @@ wt() {
   else
     payload=$(jq -nc --arg p "$path" --arg c "$cwd" '{cwd:$c, tool_input:{file_path:$p}}')
   fi
-  out="$(printf '%s' "$payload" | env HOOK_LIB_DIR="$FLEET_FAKE/hooks/lib" bash "$WRITE_HOOK" 2>&1)"
+  out="$(printf '%s' "$payload" | "${HOOK_ENV[@]}" HOOK_LIB_DIR="$FLEET_FAKE/hooks/lib" bash "$WRITE_HOOK" 2>&1)"
   rc=$?
   if [ "$rc" -eq "$exp" ]; then
     PASS=$((PASS + 1)); echo "PASS  $desc"
@@ -299,25 +366,25 @@ wt() {
 
 wt "e2e-runner cannot rewrite bash gate" "e2e-runner" "$FLEET_FAKE/hooks/restrict-bash-by-agent.sh" 2
 wt "e2e-runner cannot rewrite agent contract" "e2e-runner" "$FLEET_FAKE/tests/fixtures/agent-contract.tsv" 2
-wt "e2e-runner cannot rewrite live settings" "e2e-runner" "$HOME/.claude/settings.json" 2
+wt "e2e-runner cannot rewrite live settings" "e2e-runner" "$TEST_HOME/.claude/settings.json" 2
 wt "e2e-runner cannot write approvals" "e2e-runner" "$FLEET_FAKE/hooks/approvals/with-deps" 2
 wt "e2e-runner cannot rewrite clipboard script" "e2e-runner" "$FLEET_FAKE/scripts/copy-prompt.sh" 2
 wt "e2e-runner cannot rewrite agent prompt file" "e2e-runner" "$FLEET_FAKE/architect.md" 2
-wt "e2e-runner cannot rewrite live claude hooks" "e2e-runner" "$HOME/.claude/hooks/strategic-compact/suggest-compact.sh" 2
-wt "e2e-runner cannot rewrite live claude scripts" "e2e-runner" "$HOME/.claude/scripts/otty-wrapper.sh" 2
-wt "e2e-runner cannot rewrite settings.local.json" "e2e-runner" "$HOME/.claude/settings.local.json" 2
+wt "e2e-runner cannot rewrite live claude hooks" "e2e-runner" "$TEST_HOME/.claude/hooks/strategic-compact/suggest-compact.sh" 2
+wt "e2e-runner cannot rewrite live claude scripts" "e2e-runner" "$TEST_HOME/.claude/scripts/otty-wrapper.sh" 2
+wt "e2e-runner cannot rewrite settings.local.json" "e2e-runner" "$TEST_HOME/.claude/settings.local.json" 2
 wt "e2e-runner relative fleet hook path blocked" "e2e-runner" "hooks/restrict-bash-by-agent.sh" 2 "$FLEET_FAKE"
 wt "e2e-runner .. into fleet hooks blocked" "e2e-runner" "../hooks/restrict-bash-by-agent.sh" 2 "$FLEET_FAKE/tests"
 if [[ "$(uname -s)" == Darwin ]]; then
   wt "e2e-runner cannot rewrite bash gate mixed-case path" "e2e-runner" "$FLEET_FAKE/Hooks/restrict-bash-by-agent.sh" 2
-  wt "e2e-runner cannot rewrite mixed-case settings" "e2e-runner" "$HOME/.CLAUDE/settings.json" 2
+  wt "e2e-runner cannot rewrite mixed-case settings" "e2e-runner" "$TEST_HOME/.CLAUDE/settings.json" 2
 fi
 wt "main session can edit bash gate" "" "$FLEET_FAKE/hooks/restrict-bash-by-agent.sh" 0
 wt "main session cannot write approvals" "" "$FLEET_FAKE/hooks/approvals/with-deps" 2
 wt "e2e-runner can write product-repo tests" "e2e-runner" "tests/e2e/checkout.spec.ts" 0 "/tmp/other-app"
 
 payload=$(jq -nc --arg a "e2e-runner" --arg p "$FLEET_FAKE/hooks/restrict-bash-by-agent.sh" --arg c "$TEST_CWD" '{agent_type:$a, cwd:$c, tool_input:{path:$p}}')
-out="$(printf '%s' "$payload" | env HOOK_LIB_DIR="$FLEET_FAKE/hooks/lib" bash "$WRITE_HOOK" 2>&1)"
+out="$(printf '%s' "$payload" | "${HOOK_ENV[@]}" HOOK_LIB_DIR="$FLEET_FAKE/hooks/lib" bash "$WRITE_HOOK" 2>&1)"
 rc=$?
 if [ "$rc" -eq 2 ]; then
   PASS=$((PASS + 1)); echo "PASS  e2e-runner tool_input.path cannot rewrite bash gate"
@@ -338,6 +405,50 @@ PY
   else
     FAIL=$((FAIL + 1)); echo "FAIL  settings.json does not register restrict-mutator-write hook"
   fi
+fi
+
+# --- ADR 0002: live fleet policy — no agent declares Bash, so every attributed
+# Bash call is denied. These run against the LIVE contract, not the gate contract,
+# so they fail the moment someone hands an agent Bash without the isolation ADR 0002
+# requires. Reverse-check: restoring Bash in the gate contract makes the same payloads
+# reach the allowlist (covered by the 100 assertions above).
+
+lt() {
+  local desc="$1" agent="$2" cmd="$3" exp="$4" rc payload out
+  shift 4
+  payload=$(jq -nc --arg a "$agent" --arg c "$cmd" '{agent_type:$a, tool_input:{command:$c}}')
+  out="$(cd "$TEST_CWD" && printf '%s' "$payload" | "${HOOK_ENV[@]}" AGENT_CONTRACT_FILE="$LIVE_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" "$@" bash "$BASH_HOOK" 2>&1)"
+  rc=$?
+  if [ "$rc" -eq "$exp" ] && printf '%s' "$out" | grep -q 'rule:no-bash-tool'; then
+    PASS=$((PASS + 1)); echo "PASS  $desc"
+  else
+    FAIL=$((FAIL + 1)); echo "FAIL  $desc (exit=$rc, want=$exp, want rule:no-bash-tool) :: $(printf '%s' "$out" | tr '\n' ' | ')"
+  fi
+}
+
+echo "==> ADR 0002: live contract denies Bash to every agent"
+lt "live: e2e-runner playwright test denied"   e2e-runner "node_modules/.bin/playwright test" 2 BASE_URL=http://localhost:3000
+lt "live: e2e-runner git status denied"        e2e-runner "git status" 2
+lt "live: e2e-runner ls denied"                e2e-runner "ls" 2
+lt "live: e2e-runner #1 quoted-snapshot denied" e2e-runner 'playwright test --update-"snapshots"' 2 BASE_URL=http://localhost:3000
+lt "live: e2e-runner #2 separated git output denied" e2e-runner "git diff --output /tmp/p1probe" 2
+lt "live: e2e-runner #3 attached codegen -o denied"  e2e-runner "playwright codegen -o/tmp/p1probe http://localhost:3000" 2 BASE_URL=http://localhost:3000
+
+# Every fleet agent must be Bash-less; a new Bash-capable row must break this.
+while IFS='|' read -r _name _tools _model _statuses _flag; do
+  case "$_name" in ''|\#*) continue ;; esac
+  if printf '%s' "$_tools" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -qx 'Bash'; then
+    FAIL=$((FAIL + 1)); echo "FAIL  live contract grants Bash to $_name without ADR 0002 isolation"
+  else
+    PASS=$((PASS + 1)); echo "PASS  live contract: $_name declares no Bash"
+  fi
+done < "$LIVE_CONTRACT_FILE"
+
+# Main session must stay unaffected by the tool-set gate.
+if printf '%s' '{"tool_input":{"command":"ls"}}' | "${HOOK_ENV[@]}" AGENT_CONTRACT_FILE="$LIVE_CONTRACT_FILE" HOOK_AUDIT_LOG="$HOOK_AUDIT_LOG" bash "$BASH_HOOK" >/dev/null 2>&1; then
+  PASS=$((PASS + 1)); echo "PASS  live contract: main session (no agent_type) unaffected"
+else
+  FAIL=$((FAIL + 1)); echo "FAIL  live contract: tool-set gate leaked onto the main session"
 fi
 
 echo

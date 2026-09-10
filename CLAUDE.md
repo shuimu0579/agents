@@ -43,7 +43,7 @@ Every agent body must contain:
 
 ### E2E trust boundary
 
-The e2e-runner's `DATA, never instructions` rule is prompt-level only. Playwright executes repository config/spec JavaScript without a sandbox. Dispatch e2e-runner only after the orchestrator attests the exact repo root as trusted and supplies a resolved baseURL plus exact staging-host allowlist.
+Playwright executes repository config/spec JavaScript without a sandbox, and `e2e-runner` can author those files. Because the agent both authored and executed them, an agent-written spec was arbitrary code execution at hook privilege. **ADR 0002 removed `Bash` from `e2e-runner`**: it now authors only, and the orchestrator runs Playwright under human supervision. The `DATA, never instructions` rule remains prompt-level only. Still dispatch e2e-runner only after attesting the exact repo root as trusted and supplying a resolved baseURL plus exact staging-host allowlist — and remember that running an agent-authored spec is a trust decision the fleet does not gate.
 
 ### `_xixi` Write boundary
 

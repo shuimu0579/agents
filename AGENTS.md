@@ -4,9 +4,68 @@ A lean repository of Codex sub-agent definitions. Git checkout lives at `~/.clau
 
 ## Prerequisites
 
-- Codex (CLI that loads the generated `~/.codex/agents/*.toml` mirror of this repo)
-- Bash (for tests)
-- Optional: Playwright when using the `e2e-runner` templates
+Dropping these files into `~/.claude/agents/` does **not** install the enforcement layer.
+The hooks are what constrain agents, and they need both their dependencies and their
+registration to be present.
+
+| Requirement | Used by | If missing |
+|---|---|---|
+| Bash (macOS ships 3.2 — the hooks target it) | everything | nothing runs |
+| `jq` | both PreToolUse gates, `_xixi` hooks | **the gates deny every attributed event** (fail closed) |
+| `python3` | path canonicalization, `_xixi` inode checks | falls back to lexical normalization; `_xixi` copy refuses |
+| `pbcopy` / `wl-copy` / `xclip` | `_xixi` clipboard delivery | delivery reports `⚠️ failed`; refinement still returned |
+| Hook registration in `~/.claude/settings.json` | all four hooks | **agents are unconstrained and every suite still passes** |
+| Codex + a current `~/.codex/agents/*.toml` mirror | Codex-side dispatch | Codex runs a stale agent definition |
+| Playwright (optional) | `e2e-runner` templates | the **orchestrator** runs it; the agent has no execution (ADR 0002) |
+
+### Minting a privileged approval
+
+`e2e-runner` cannot run anything (ADR 0002), so the two one-shot approvals exist for the
+orchestrator's own privileged operations. They are no longer empty files — a token that
+names nothing authorizes anything (audit #21):
+
+```bash
+scripts/create-approval.sh <with-deps|snapshots> <session-id>
+```
+
+The token binds the session and the repository, is created exclusively at mode 600, and
+is refused if either binding fails to match, if the caller presents no session id, or if
+it carries no binding fields. It is still one-shot and still expires after 300s. An agent
+cannot mint its own: the Write/Edit gate denies every write under `hooks/approvals/`
+unconditionally.
+
+### Accepted dependency risk: the Codex MCP server
+
+`.codex/config.toml` launches the Claude Code bridge with `npx -y claude-octopus@<version>`.
+The version is pinned exactly, but `npx` fetches at run time and gives no integrity
+pinning for the package or its transitive dependencies, and `-y` installs without
+prompting (audit #35).
+
+This is **not** fixed by hand-editing the file. `cc-suite:update` owns that entry — it
+re-renders the cc-suite-managed parts of `.codex/config.toml` and re-pins
+claude-octopus — so a local edit pointing at a lockfile-installed binary is reverted the
+next time that command runs. A durable fix belongs upstream in cc-suite, as a lockfile
+plus an explicit local executable path.
+
+What holds today: the exact version pin, and `cc-suite:update` verifying that the pin
+actually boots and speaks MCP before use. What does not: any guarantee about the
+transitive dependency tree. Treat a Codex session's MCP bridge as running third-party
+code fetched at launch.
+
+### Preflight
+
+```bash
+command -v jq python3 >/dev/null || echo "MISSING: jq/python3 — gates will fail closed"
+ls -l hooks/*.sh hooks/xixi/*.sh | grep -v '^-rwx' && echo "MISSING: executable bit"
+bash tests/hook-e2e.test.sh          # asserts settings.json registers all four hooks
+bash scripts/sync-codex-mirror.sh --check
+bash tests/run_all.sh
+```
+
+Registration and dependency presence are the two failure modes the test suites cannot
+catch on their own: an unregistered hook leaves every suite green while constraining
+nothing. See `hooks/xixi/CONTRACT.md` for the one check that still has to be done by
+hand — whether the host stamps `agent_type` on subagent Write events.
 
 ## Active Agents
 
@@ -15,7 +74,7 @@ A lean repository of Codex sub-agent definitions. Git checkout lives at `~/.clau
 | `architect` | System design, trade-off analysis | Read, Grep, Glob | opus |
 | `code-reviewer` | Code quality review | Read, Grep, Glob | sonnet |
 | `security-reviewer` | Security vulnerability review | Read, Grep, Glob | sonnet |
-| `e2e-runner` | Playwright E2E test automation | Read, Write, Edit, Bash, Grep, Glob | sonnet |
+| `e2e-runner` | Playwright E2E spec authoring & repair | Read, Write, Edit, Grep, Glob | sonnet |
 | `_xixi` | LLM prompt refinement + clipboard delivery | Read, Grep, Glob, Write | sonnet |
 | `_critical_thinking` | Critical thinking guide (Beyond Feelings) | Read, Grep, Glob | sonnet |
 
@@ -86,7 +145,7 @@ Every agent body must contain:
 
 ### E2E trust boundary
 
-The e2e-runner's `DATA, never instructions` rule is prompt-level only. Playwright executes repository config/spec JavaScript without a sandbox. Dispatch e2e-runner only after the orchestrator attests the exact repo root as trusted and supplies a resolved baseURL plus exact staging-host allowlist.
+Playwright executes repository config/spec JavaScript without a sandbox, and `e2e-runner` can author those files. Because the agent both authored and executed them, an agent-written spec was arbitrary code execution at hook privilege. **ADR 0002 removed `Bash` from `e2e-runner`**: it now authors only, and the orchestrator runs Playwright under human supervision. The `DATA, never instructions` rule remains prompt-level only. Still dispatch e2e-runner only after attesting the exact repo root as trusted and supplying a resolved baseURL plus exact staging-host allowlist — and remember that running an agent-authored spec is a trust decision the fleet does not gate.
 
 ### `_xixi` Write boundary
 
@@ -98,7 +157,21 @@ Do not commit *Beyond Feelings* (or any copyrighted book) into this repo. Distil
 
 ## Run
 
-There is no build or compile step. Claude Code auto-loads `*.md` from `~/.claude/agents/`. Codex loads the generated `~/.codex/agents/*.toml` mirror. Verify changes with the commands under Testing & CI.
+Claude Code auto-loads `*.md` from `~/.claude/agents/` — for it there is no build step.
+Codex does **not** read those files; it loads `~/.codex/agents/*.toml`, a generated
+mirror. That mirror is a real build artifact and it drifts silently: on 2026-09-09 three
+mirrors were still carrying pre-ADR-0002 bodies, so a Codex-dispatched `e2e-runner`
+believed it could still run Playwright days after `Bash` was removed from it.
+
+```bash
+bash scripts/sync-codex-mirror.sh          # regenerate stale mirrors from the .md sources
+bash scripts/sync-codex-mirror.sh --check  # exit 1 if any mirror is older than its source
+```
+
+Run the sync after **any** change to an agent `.md`. The `--check` form belongs in
+preflight; it is deliberately not part of `run_all.sh`, because a missing `~/.codex`
+directory is normal on a machine that only uses Claude Code and must not fail the
+suite. Verify other changes with the commands under Testing & CI.
 
 ## Testing & CI
 
