@@ -54,6 +54,7 @@ run_suite "Bash Mutator Gate Tests (hooks.test.sh)" "bash tests/hooks.test.sh"
 run_suite "Xixi Write Sandbox & Clipboard Tests (xixi-hooks.test.sh)" "bash tests/xixi-hooks.test.sh"
 run_suite "Hook Registration & E2E Tests (hook-e2e.test.sh)" "bash tests/hook-e2e.test.sh"
 run_suite "P1 Bypass Probes (p1-bypass.test.sh)" "bash tests/p1-bypass.test.sh"
+run_suite "P3 Lib Hardening Probes (p3-lib-hardening.test.sh)" "bash tests/p3-lib-hardening.test.sh"
 
 echo
 echo "================================================================================"

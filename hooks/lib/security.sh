@@ -304,6 +304,8 @@ sec_consume_approval() {
     return 1
   fi
 
-  rm -f -- "$claim" 2>/dev/null || true
+  if ! rm -f -- "$claim" 2>/dev/null || [[ -e "$claim" || -L "$claim" ]]; then
+    return 1
+  fi
   return 0
 }

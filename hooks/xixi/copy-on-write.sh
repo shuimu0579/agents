@@ -125,6 +125,9 @@ case "$rc" in
   15)
     emit_status "[xixi-hook] ⚠️ clipboard copy failed (copy-prompt.sh missing). Paste the full refined prompt into chat as fallback, then tell the user ⚠️ 剪贴板复制失败，上方为完整 prompt，请手动复制"
     ;;
+  16)
+    emit_status "[xixi-hook] ⚠️ refused: python3 unavailable, so the single-descriptor read that guards this copy cannot run (audit #23). Install python3 to restore clipboard delivery. Paste the full refined prompt into chat as fallback, then tell the user ⚠️ 剪贴板复制失败，上方为完整 prompt，请手动复制"
+    ;;
   *)
     emit_status "[xixi-hook] ⚠️ clipboard copy failed. Paste the full refined prompt into chat as fallback, then tell the user ⚠️ 剪贴板复制失败，上方为完整 prompt，请手动复制"
     ;;
