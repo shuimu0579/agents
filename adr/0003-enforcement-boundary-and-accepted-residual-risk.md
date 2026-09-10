@@ -30,6 +30,12 @@ The hooks are a **PreToolUse authorization gate**. They decide whether a tool ca
 permitted, using only what the host hands them: an event payload naming an agent, a
 command or a path. That is the whole mechanism, and three properties follow from it.
 
+> **Scope narrowed by ADR 0005 (2026-09-10).** The fail-closed rule below reads
+> *fail closed within fleet scope, and whenever scope cannot be established; abstain on
+> validated external identities.* The gate is registered globally and sees every
+> subagent on the machine; it governs the ones this fleet defines. Everything else in
+> this ADR stands.
+
 **It is an allowlist, and it fails closed.** An unreadable contract, a missing `jq`, a
 payload that is not an event object, a path that cannot be normalized, or a command that
 cannot be tokenized unambiguously all deny. Denial is the default; permission is the
