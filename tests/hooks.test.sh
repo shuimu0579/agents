@@ -147,7 +147,12 @@ bt_payload() {
 # --- main session / unknown → pass through (no agent_type) ---
 bt "main session free" "" "rm -rf /tmp/x" 0
 bt "main session multi-line allowed" "" $'echo a\necho b' 0
-bt "unknown named agent fail-closed" "some-future-agent" "git status" 2
+# ADR 0005 narrowed this. An identity with no fleet definition on disk is one this gate
+# does not govern, so it abstains (exit 0 — no authorization decision, host controls
+# still apply) rather than denying an agent it has no policy for. Fail-closed still
+# holds INSIDE scope: see tests/p3-gate-scope.test.sh, where a fleet agent whose
+# contract row was deleted, an empty policy field, and an unusable contract all deny.
+bt "unknown external agent is out of scope" "some-future-agent" "git status" 0
 
 # --- real-shaped PreToolUse payload + observable attribution (F1) ---
 real_payload='{"session_id":"real-shaped-session","transcript_path":"/tmp/transcript.jsonl","cwd":"/tmp/repo","permission_mode":"bypassPermissions","hook_event_name":"PreToolUse","tool_name":"Bash","agent_type":"e2e-runner","tool_input":{"command":"node_modules/.bin/playwright test"},"tool_use_id":"toolu_test"}'

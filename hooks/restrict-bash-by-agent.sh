@@ -113,6 +113,14 @@ if [[ ! -r "$AGENT_CONTRACT_FILE" ]]; then
   block "[bash-hook] BLOCKED: agent contract unavailable (rule:contract)." "contract-missing"
 fi
 
+# Abstaining on an external identity is only sound while the gate can still establish
+# what its own scope IS. An empty, truncated or malformed contract means it cannot, so
+# every attributed call is denied until the contract is intact again (ADR 0005).
+contract_rows="$(awk -F'|' 'BEGIN{n=0} /^[[:space:]]*(#|$)/ {next} NF==5 && $1 != "" {n++} END{print n+0}' "$AGENT_CONTRACT_FILE" 2>/dev/null || printf '0')"
+if [[ ! "$contract_rows" =~ ^[0-9]+$ || "$contract_rows" -lt 1 ]]; then
+  block "[bash-hook] BLOCKED: fleet contract has no usable rows — scope cannot be established (rule:contract-unusable)." "contract-unusable"
+fi
+
 agent_policy="$(awk -F'|' -v target="$agent" '$1 == target { print $5; exit }' "$AGENT_CONTRACT_FILE" 2>/dev/null || true)"
 case "$agent_policy" in
   review_only)
@@ -120,7 +128,25 @@ case "$agent_policy" in
     ;;
   mutator) ;;
   "")
-    block "[bash-hook] BLOCKED: named agent is absent from the fleet contract (rule:unknown-agent)." "unknown-agent"
+    # Absent from the contract. That is either an agent this fleet does not govern, or
+    # a contract that has lost a row — and the two must not be confused (ADR 0005).
+    #
+    # The discriminator is the definition on disk: a fleet agent always has
+    # <name>.md at the fleet root. Present without a contract row means the contract
+    # is damaged, and damage denies. Absent means the identity is genuinely external.
+    #
+    # A single stat, deliberately not a directory scan: this runs on the PreToolUse hot
+    # path for every Bash call on the machine.
+    if [[ -f "${FLEET_ROOT_FOR_APPROVAL}/${agent}.md" ]]; then
+      block "[bash-hook] BLOCKED: $agent has a fleet definition but no contract row — the fleet contract is damaged (rule:contract-incomplete)." "contract-incomplete"
+    fi
+    # Out of scope. Exit 0 means "this hook makes no authorization decision", NOT a
+    # grant: whatever the host permits for that agent still applies. Denying here was
+    # broader denial, not stronger safety — it has no policy to enforce for an agent it
+    # did not define, and it degraded real work (a review of this repo lost git access
+    # and reviewed the wrong commit).
+    audit_decision "out-of-scope" "abstain"
+    exit 0
     ;;
   *)
     block "[bash-hook] BLOCKED: invalid agent policy in fleet contract (rule:contract)." "contract-invalid"
