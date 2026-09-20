@@ -1,6 +1,6 @@
-# Codex Agent Fleet (Codex — 6 agents)
+# Agent Fleet (6 agents)
 
-A lean repository of Codex sub-agent definitions. Git checkout lives at `~/.claude/agents/` (same tree Claude Code loads) and is tracked at `github.com/shuimu0579/agents`. Codex CLI consumes a generated `~/.codex/agents/*.toml` mirror of these `.md` files — there is no separate `~/.Codex/` checkout.
+A lean repository of sub-agent definitions shared by Claude Code and Codex. Git checkout lives at `~/.claude/agents/` (same tree Claude Code loads) and is tracked at `github.com/shuimu0579/agents`. Codex CLI consumes a generated `~/.codex/agents/*.toml` mirror of these `.md` files — there is no separate `~/.Codex/` checkout.
 
 ## Prerequisites
 
@@ -159,7 +159,7 @@ Do not commit *Beyond Feelings* (or any copyrighted book) into this repo. Distil
 
 Claude Code auto-loads `*.md` from `~/.claude/agents/` — for it there is no build step.
 Codex does **not** read those files; it loads `~/.codex/agents/*.toml`, a generated
-mirror. That mirror is a real build artifact and it drifts silently: on 2026-09-09 three
+mirror. That mirror is a real build artifact (ADR 0004) and it drifts silently: on 2026-09-09 three
 mirrors were still carrying pre-ADR-0002 bodies, so a Codex-dispatched `e2e-runner`
 believed it could still run Playwright days after `Bash` was removed from it.
 
