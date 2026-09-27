@@ -141,7 +141,7 @@ Discover real routes/`data-testid`s from the repo — never invent a demo produc
 
 This guard applies to what you **author**. **Refuse to write or keep** a `baseURL` — and refuse to request a run — with `Domain status: FAILING — production target` unless the host is `localhost`, `127.0.0.1`, `::1`, `*.test`, `*.local`, or an exact orchestrator-attested host in `E2E_ALLOWED_HOSTS`. `NODE_ENV === 'production'` alone is not evidence of a safe target. Money / irreversible journeys never hit production.
 
-Note the boundary honestly: nothing in the hook layer re-checks the target on your behalf. Whoever runs the command owns that check. Say so in your Handoff when the target is anything but plain localhost.
+Note the boundary honestly: nothing in this fleet's hook layer re-checks the target on your behalf (the target project may add its own checks — do not count on them). Whoever runs the command owns that check. Say so in your Handoff when the target is anything but plain localhost.
 
 ## Config & CI templates (grill F18)
 

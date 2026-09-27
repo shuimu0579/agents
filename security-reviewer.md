@@ -127,7 +127,7 @@ Severity scale, canonical `Verdict`, and report skeleton follow `~/.claude/agent
 ### [LOW] ...
 
 ## Scans
-- **Secrets (Grep, path:line only):** clean | hits: [paths] (values truncated first4/last4 only)
+- **Secrets (Grep, path:line only):** clean | hits: [paths] (keys/tokens >16 chars: first4/last4 only; passwords and shorter values: no characters)
 - **Static sinks (Grep, path:line only):** clean | hits: [paths]
 - **Dependencies:** not executed here — owner-run: `[npm audit | pip-audit | cargo audit …]`
 - **Optional CLIs for owner:** `[trufflehog | semgrep | …]`
