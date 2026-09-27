@@ -58,6 +58,7 @@ Guardrails match exact rows of the form `| <agent> | <token> |` (optional backti
 | e2e-runner | PASSING | GO |
 | e2e-runner | QUARANTINE | NEEDS_INPUT |
 | e2e-runner | FAILING | BLOCK |
+| e2e-runner | NOT RUN | NEEDS_INPUT |
 | _xixi | ✅ copied | GO |
 | _xixi | ⚠️ failed | NEEDS_INPUT |
 | _critical_thinking | SOUND | GO |

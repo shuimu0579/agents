@@ -75,9 +75,7 @@ For each decision: **Pros** / **Cons** / **Alternatives** / **Decision + rationa
 
 ## Decision principles (brief)
 
-- **Modularity**: single responsibility, high cohesion, low coupling, clear interfaces
 - **Scalability**: prefer horizontal scaling, stateless design, efficient queries; add caching only with an explicit TTL and measured target (cite a repo/orchestrator SLO or concrete constraint; do not guess targets)
-- **Maintainability**: clear organization, consistent patterns, simplicity first
 - **Security**: defense in depth, least privilege, schema-validated input at boundaries
 - **Simplicity**: prefer simple, proven patterns from the repo — not a canned demo stack
 
@@ -154,4 +152,4 @@ Severity / Verdict vocabulary follow `~/.claude/agents/docs/agent-output-contrac
 
 Map: RECOMMEND→GO · OPTIONS→NEEDS_INPUT · BLOCKED→BLOCK.
 
-**Remember**: Good architecture enables rapid development, easy maintenance, and confident scaling. Prefer simple, clear patterns proven by the repo — not a canned demo stack.
+**Remember**: prefer simple, clear patterns proven by the repo — not a canned demo stack.
