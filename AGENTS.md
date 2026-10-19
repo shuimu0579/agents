@@ -168,6 +168,8 @@ bash scripts/sync-codex-mirror.sh          # regenerate stale mirrors from the .
 bash scripts/sync-codex-mirror.sh --check  # exit 1 if any mirror is older than its source
 ```
 
+Every generated mirror starts with a Codex runtime note: Claude Code hooks are not installed in Codex, so gate and clipboard behaviour described in a definition is instruction-only there.
+
 Run the sync after **any** change to an agent `.md`. The `--check` form belongs in
 preflight; it is deliberately not part of `run_all.sh`, because a missing `~/.codex`
 directory is normal on a machine that only uses Claude Code and must not fail the
