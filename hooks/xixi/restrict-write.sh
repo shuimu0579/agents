@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # restrict-write.sh — PreToolUse gate for the _xixi subagent.
 #
-# When agent_type is _xixi / xixi, only allow Write to:
+# When agent_type or subagentType is _xixi / xixi, only allow Write to:
 #   /tmp/xixi-prompt-<8-alnum-id>
 #
-# Canonical: ~/.claude/agents/hooks/xixi/ (git). Live registration: settings.json.
+# Canonical: ~/.claude/agents/hooks/xixi/ (git).
+# Registration is required and is not implied by this file.
+# Claude loads ~/.claude/settings.json. Grok loads ~/.grok/hooks/agent-gates.json.
+# hooks.json is a non-loaded mirror.
 #
 # Exit: 0 allow · 2 BLOCK
 set -euo pipefail
@@ -27,7 +30,7 @@ deny() {
 }
 
 raw_payload_names_xixi() {
-  printf '%s' "$input" | grep -qE '"agent_type"[[:space:]]*:[[:space:]]*"_?xixi"'
+  printf '%s' "$input" | grep -qE '"(agent_type|subagentType)"[[:space:]]*:[[:space:]]*"_?xixi"'
 }
 
 if ! command -v jq >/dev/null 2>&1; then
@@ -38,11 +41,18 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 # Direct invocation with no hook payload is a main-session/no-op probe, matching
-# restrict-bash-by-agent.sh. A NON-EMPTY payload that is not an event object is a
-# denial, not a pass-through: jq -e . accepts any truthy JSON, so an array or string
-# used to reach the sandbox checks with every field silently empty.
-if [[ -n "$input" ]] && ! printf '%s' "$input" | jq -e 'type == "object"' >/dev/null 2>&1; then
+# restrict-bash-by-agent.sh. A NON-EMPTY payload that is not one event object is a
+# denial: jq without -s reads the first document of concatenated JSON.
+if [[ -n "$input" ]] && ! printf '%s' "$input" | jq -e -s 'length == 1 and (.[0] | type == "object")' >/dev/null 2>&1; then
   deny "[xixi-hook] BLOCKED: payload must be a JSON object (rule:schema)."
+fi
+# take() drops non-strings, so agent_type:17 used to look like the main session.
+if [[ -n "$input" ]] && ! printf '%s' "$input" | jq -e '
+  (.agent_type == null or (.agent_type | type == "string")) and
+  (.subagentType == null or (.subagentType | type == "string")) and
+  ([.. | strings | contains("\u0000")] | any | not)
+' >/dev/null 2>&1; then
+  deny "[xixi-hook] BLOCKED: invalid attribution or NUL in payload (rule:schema)."
 fi
 
 if [[ ! -r "${XIXI_DIR}/common.sh" ]]; then
@@ -58,8 +68,31 @@ for fn in is_xixi_agent is_allowed_xixi_path reserve_xixi_path assert_reserved_x
   fi
 done
 
-file_path=$(printf '%s' "$input" | jq -r 'try (.tool_input.file_path // empty) catch empty' 2>/dev/null || true)
-agent_type=$(printf '%s' "$input" | jq -r 'try (.agent_type // empty) catch empty' 2>/dev/null || true)
+if printf '%s' "$input" | jq -e '
+  def take: select(type == "string" and length > 0);
+  def many($xs): ($xs | map(take) | unique | length) > 1;
+  many([.agent_type, .subagentType])
+  or many(
+    (if (.tool_input | type) == "object" then [.tool_input.file_path, .tool_input.path] else [] end)
+    + (if (.toolInput | type) == "object" then [.toolInput.file_path, .toolInput.path] else [] end)
+  )
+' >/dev/null 2>&1; then
+  deny "[xixi-hook] BLOCKED: conflicting snake_case and camelCase fields (rule:field-conflict)."
+fi
+
+file_path=$(printf '%s' "$input" | jq -r '
+  def take: select(type == "string" and length > 0);
+  try (
+    (
+      (if (.tool_input | type) == "object" then [.tool_input.file_path, .tool_input.path] else [] end)
+      + (if (.toolInput | type) == "object" then [.toolInput.file_path, .toolInput.path] else [] end)
+    ) | map(take) | unique | .[0] // empty
+  ) catch empty
+' 2>/dev/null || true)
+agent_type=$(printf '%s' "$input" | jq -r '
+  def take: select(type == "string" and length > 0);
+  try ([.agent_type, .subagentType] | map(take) | unique | .[0] // empty) catch empty
+' 2>/dev/null || true)
 
 if ! is_xixi_agent "$agent_type"; then
   exit 0

@@ -72,6 +72,10 @@ try:
                 continue
             if not os.access(command, os.X_OK):
                 continue
+            if hook.get("timeout") != 5:
+                raise ValueError(
+                    f"{expected.name} timeout is {hook.get('timeout')!r}, want 5"
+                )
             for tool in tools:
                 commands[tool].append(command)
     if not all(commands.values()):

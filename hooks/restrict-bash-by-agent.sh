@@ -2,7 +2,13 @@
 # restrict-bash-by-agent.sh — PreToolUse Bash gate for mutator agents.
 #
 # Canonical path (git): ~/.claude/agents/hooks/restrict-bash-by-agent.sh
-# Register in settings.json PreToolUse matcher Bash. MUST stay executable (chmod 755).
+# Register in the host that actually loads hooks. Claude: settings.json.
+# Grok: ~/.grok/hooks/agent-gates.json (compat.claude.hooks is off).
+# This file existing does not register the hook. MUST stay executable (chmod 755).
+#
+# Field names: Claude sends agent_type / tool_input / session_id.
+# Grok sends subagentType / toolInput / sessionId. Both are accepted.
+# Neither identity field → main-session pass-through. Disagreeing pairs deny.
 #
 # Exit: 0 allow · 2 BLOCK (stderr to model)
 #
@@ -88,19 +94,48 @@ fi
 if ! printf '%s' "$input" | jq -e -s 'length == 1 and (.[0] | type == "object")' >/dev/null 2>&1; then
   block "[bash-hook] BLOCKED: payload must be one JSON object (rule:schema)." "schema"
 fi
+# Type-check each object before indexing it. A single try around .tool_input
+# never reaches toolInput when tool_input is a non-object (jq errors, catch
+# swallows the alternative). Empty strings are absent so they cannot hide the
+# other spelling. Two different non-empty values is a conflict, not a choice.
 if ! printf '%s' "$input" | jq -e '
+  def take: select(type == "string" and length > 0);
+  def at_most_one($xs): ($xs | map(take) | unique | length) <= 1;
   (.agent_type == null or (.agent_type | type == "string")) and
-  ([.. | strings | contains("\u0000")] | any | not)
+  (.subagentType == null or (.subagentType | type == "string")) and
+  (.session_id == null or (.session_id | type == "string")) and
+  (.sessionId == null or (.sessionId | type == "string")) and
+  ([.. | strings | contains("\u0000")] | any | not) and
+  at_most_one([.agent_type, .subagentType]) and
+  at_most_one([.session_id, .sessionId]) and
+  at_most_one(
+    (if (.tool_input | type) == "object" then [.tool_input.command, .tool_input.cmd] else [] end)
+    + (if (.toolInput | type) == "object" then [.toolInput.command, .toolInput.cmd] else [] end)
+  )
 ' >/dev/null 2>&1; then
-  block "[bash-hook] BLOCKED: invalid attribution or NUL in payload (rule:schema)." "schema"
+  block "[bash-hook] BLOCKED: invalid attribution, field conflict, or NUL in payload (rule:schema)." "schema"
 fi
 # The sentinel preserves trailing newlines so command substitution cannot hide
 # a multiline command or turn a newline-only agent name into the main session.
-cmd=$(printf '%s' "$input" | jq -r 'try (.tool_input.command // .tool_input.cmd // empty | select(type == "string")) catch empty' 2>/dev/null || true; printf '.')
+cmd=$(printf '%s' "$input" | jq -r '
+  def take: select(type == "string" and length > 0);
+  try (
+    (
+      (if (.tool_input | type) == "object" then [.tool_input.command, .tool_input.cmd] else [] end)
+      + (if (.toolInput | type) == "object" then [.toolInput.command, .toolInput.cmd] else [] end)
+    ) | map(take) | unique | .[0] // empty
+  ) catch empty
+' 2>/dev/null || true; printf '.')
 cmd="${cmd%.}"; cmd="${cmd%$'\n'}"
-agent=$(printf '%s' "$input" | jq -r 'try (.agent_type // empty) catch empty' 2>/dev/null || true; printf '.')
+agent=$(printf '%s' "$input" | jq -r '
+  def take: select(type == "string" and length > 0);
+  try ([.agent_type, .subagentType] | map(take) | unique | .[0] // empty) catch empty
+' 2>/dev/null || true; printf '.')
 agent="${agent%.}"; agent="${agent%$'\n'}"
-session_id=$(printf '%s' "$input" | jq -r 'try (.session_id // empty | select(type == "string")) catch empty' 2>/dev/null || true; printf '.')
+session_id=$(printf '%s' "$input" | jq -r '
+  def take: select(type == "string" and length > 0);
+  try ([.session_id, .sessionId] | map(take) | unique | .[0] // empty) catch empty
+' 2>/dev/null || true; printf '.')
 session_id="${session_id%.}"; session_id="${session_id%$'\n'}"
 observe_attribution
 

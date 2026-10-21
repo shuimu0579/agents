@@ -6,7 +6,17 @@
 # and live Claude settings — a mutator must not rewrite its own constraints.
 #
 # Canonical: ~/.claude/agents/hooks/restrict-mutator-write.sh
-# Register in settings.json PreToolUse matcher Write|Edit. MUST stay executable.
+# Register in the host that loads hooks. Claude: settings.json matcher Write|Edit.
+# Grok: ~/.grok/hooks/agent-gates.json matcher Write|Edit|write.
+# This file existing does not register the hook. MUST stay executable.
+#
+# Field names: agent_type|subagentType, tool_input|toolInput, file_path|path.
+# Neither identity → main session. An attributed write with no path is denied.
+# Attributed agents also cannot write ${HOME}/.grok (config, hooks, the whole tree).
+# The main session can. Approvals stay denied for everyone.
+# A non-empty payload needs jq (rule:parse-no-jq). Newline or CR in the path is
+# denied before canonicalization (rule:path-framing); command substitution cannot
+# keep a NUL frame around canon_batch's line-oriented records.
 #
 # Exit: 0 allow · 2 BLOCK
 set -uo pipefail
@@ -20,10 +30,6 @@ if [[ -f "${LIB_DIR}/core.sh" ]]; then
   source "${LIB_DIR}/core.sh"
 fi
 
-canon_path() {
-  python3 -c 'import os,sys; print(os.path.realpath(os.path.normpath(os.path.expanduser(sys.argv[1]))))' "$1"
-}
-
 # One python3 start costs ~70ms and this hook is on the PreToolUse hot path, paid by
 # every Write/Edit. Canonicalizing each path separately meant five interpreter starts
 # per decision (~350ms measured). canon_batch resolves them all in a single process;
@@ -33,7 +39,7 @@ canon_batch() {
 import os, sys
 for a in sys.argv[1:]:
     try:
-        print(os.path.realpath(os.path.normpath(os.path.expanduser(a))))
+        print(os.path.realpath(os.path.expanduser(a)))
     except Exception:
         print("")
 ' "$@"
@@ -62,33 +68,55 @@ if [[ -z "$input" ]]; then
   exit 0
 fi
 
-parse_ok=0
 agent=""
 file_path=""
 cwd=""
-if command -v jq >/dev/null 2>&1; then
-  if ! printf '%s' "$input" | jq -e 'type == "object"' >/dev/null 2>&1; then
-    block "[write-hook] BLOCKED: payload must be a JSON object (rule:schema)."
-  fi
-  agent=$(printf '%s' "$input" | jq -r 'try (.agent_type // empty) catch empty' 2>/dev/null || true)
-  file_path=$(printf '%s' "$input" | jq -r 'try (.tool_input.file_path // .tool_input.path // empty) catch empty' 2>/dev/null || true)
-  cwd=$(printf '%s' "$input" | jq -r 'try (.cwd // empty) catch empty' 2>/dev/null || true)
-  parse_ok=1
-else
-  if printf '%s' "$input" | grep -qE '"agent_type"[[:space:]]*:[[:space:]]*"[^"[:space:]]+"'; then
-    block "[write-hook] BLOCKED: jq unavailable — cannot attribute agent_type for Write/Edit gate. Install jq."
-  fi
-  exit 0
+# Same policy as the Bash gate: without jq a non-empty event cannot be attributed,
+# including an unattributed write of approvals or an ordinary path.
+if ! command -v jq >/dev/null 2>&1; then
+  block "[write-hook] BLOCKED: jq unavailable — cannot attribute Write/Edit event (rule:parse-no-jq)."
 fi
-
-if [[ "$parse_ok" -eq 0 ]]; then
-  if printf '%s' "$input" | grep -qE '"agent_type"[[:space:]]*:[[:space:]]*"[^"[:space:]]+"'; then
-    block "[write-hook] BLOCKED: cannot parse Write/Edit payload (rule:parse)."
-  fi
-  exit 0
+# Slurp so concatenated documents are not accepted as the first object.
+if ! printf '%s' "$input" | jq -e -s 'length == 1 and (.[0] | type == "object")' >/dev/null 2>&1; then
+  block "[write-hook] BLOCKED: payload must be a JSON object (rule:schema)."
 fi
+if ! printf '%s' "$input" | jq -e '
+  (.agent_type == null or (.agent_type | type == "string")) and
+  (.subagentType == null or (.subagentType | type == "string")) and
+  ([.. | strings | contains("\u0000")] | any | not)
+' >/dev/null 2>&1; then
+  block "[write-hook] BLOCKED: invalid attribution or NUL in payload (rule:schema)."
+fi
+if printf '%s' "$input" | jq -e '
+  def take: select(type == "string" and length > 0);
+  def many($xs): ($xs | map(take) | unique | length) > 1;
+  many([.agent_type, .subagentType])
+  or many(
+    (if (.tool_input | type) == "object" then [.tool_input.file_path, .tool_input.path] else [] end)
+    + (if (.toolInput | type) == "object" then [.toolInput.file_path, .toolInput.path] else [] end)
+  )
+' >/dev/null 2>&1; then
+  block "[write-hook] BLOCKED: conflicting snake_case and camelCase fields (rule:field-conflict)."
+fi
+agent=$(printf '%s' "$input" | jq -r '
+  def take: select(type == "string" and length > 0);
+  try ([.agent_type, .subagentType] | map(take) | unique | .[0] // empty) catch empty
+' 2>/dev/null || true)
+file_path=$(printf '%s' "$input" | jq -r '
+  def take: select(type == "string" and length > 0);
+  try (
+    (
+      (if (.tool_input | type) == "object" then [.tool_input.file_path, .tool_input.path] else [] end)
+      + (if (.toolInput | type) == "object" then [.toolInput.file_path, .toolInput.path] else [] end)
+    ) | map(take) | unique | .[0] // empty
+  ) catch empty
+' 2>/dev/null || true)
+cwd=$(printf '%s' "$input" | jq -r 'try (.cwd // empty) catch empty' 2>/dev/null || true)
 
 if [[ -z "$file_path" ]]; then
+  if [[ -n "$agent" ]]; then
+    block "[write-hook] BLOCKED: attributed Write/Edit payload is missing a path (rule:missing-path)."
+  fi
   exit 0
 fi
 
@@ -101,8 +129,15 @@ fi
 if [[ "$resolved" != /* ]]; then
   resolved="${cwd%/}/${resolved}"
 fi
+# canon_batch prints one path per line. A newline or CR in the target shifts later
+# records, and $(...) strips NUL, so a NUL frame cannot repair that. Reject first.
+case "$resolved" in
+  *$'\n'*|*$'\r'*)
+    block "[write-hook] BLOCKED: path contains a newline or carriage return (rule:path-framing)."
+    ;;
+esac
 # Pure-shell lexical normalization: collapses "." and ".." without resolving
-# symlinks. canon_path (python3) is still preferred because it also resolves
+# symlinks. canon_batch (python3) is still preferred because it also resolves
 # symlinks, but the approvals rule is documented as unconditional, so it must not
 # depend on python3 being installed. Without this, a path such as
 # .../hooks/lib/../approvals/with-deps never matches the approvals glob.
@@ -126,6 +161,7 @@ if command -v python3 >/dev/null 2>&1; then _HAVE_PYTHON3=1; else _HAVE_PYTHON3=
 # the target itself, and the two live settings files the self-protection list checks.
 _CANON_SETTINGS_1="${CLAUDE_HOME}/settings.json"
 _CANON_SETTINGS_2="${CLAUDE_HOME}/settings.local.json"
+_CANON_GROK="${HOME}/.grok"
 _CANON_TARGET=""
 if [[ "$_HAVE_PYTHON3" -eq 1 ]]; then
   _canon_out="$(canon_batch \
@@ -133,20 +169,33 @@ if [[ "$_HAVE_PYTHON3" -eq 1 ]]; then
     "${CLAUDE_CONFIG_DIR:-${HOME}/.claude}" \
     "$resolved" \
     "${CLAUDE_HOME}/settings.json" \
-    "${CLAUDE_HOME}/settings.local.json" 2>/dev/null || true)"
+    "${CLAUDE_HOME}/settings.local.json" \
+    "${HOME}/.grok" 2>/dev/null || true)"
   if [[ -n "$_canon_out" ]]; then
     IFS=$'\n' read -r -d '' -a _canon_arr < <(printf '%s\0' "$_canon_out") || true
-    [[ -n "${_canon_arr[0]:-}" ]] && FLEET_ROOT="${_canon_arr[0]}"
-    [[ -n "${_canon_arr[1]:-}" ]] && CLAUDE_HOME="${_canon_arr[1]}"
-    _CANON_TARGET="${_canon_arr[2]:-}"
-    [[ -n "${_canon_arr[3]:-}" ]] && _CANON_SETTINGS_1="${_canon_arr[3]}"
-    [[ -n "${_canon_arr[4]:-}" ]] && _CANON_SETTINGS_2="${_canon_arr[4]}"
+    # Six inputs, six records. A short array is ambiguous, so it must not set
+    # _physical or replace the fleet roots.
+    if [[ "${#_canon_arr[@]}" -eq 6 ]]; then
+      [[ -n "${_canon_arr[0]:-}" ]] && FLEET_ROOT="${_canon_arr[0]}"
+      [[ -n "${_canon_arr[1]:-}" ]] && CLAUDE_HOME="${_canon_arr[1]}"
+      _CANON_TARGET="${_canon_arr[2]:-}"
+      [[ -n "${_canon_arr[3]:-}" ]] && _CANON_SETTINGS_1="${_canon_arr[3]}"
+      [[ -n "${_canon_arr[4]:-}" ]] && _CANON_SETTINGS_2="${_canon_arr[4]}"
+      [[ -n "${_canon_arr[5]:-}" ]] && _CANON_GROK="${_canon_arr[5]}"
+    fi
   fi
 fi
 
 _norm_ok=0
+_physical=0
 if [[ -n "$_CANON_TARGET" ]]; then
-  resolved="$_CANON_TARGET"; _norm_ok=1
+  resolved="$_CANON_TARGET"; _norm_ok=1; _physical=1
+fi
+# Lexical ".." collapse is the symlink bypass. Attributed writes need the physical
+# path. Main session still falls back so the unconditional approvals rule works
+# on a machine without python3.
+if [[ "$_physical" -eq 0 && -n "$agent" ]]; then
+  block "[write-hook] BLOCKED: cannot resolve Write/Edit path physically for $agent (rule:realpath)."
 fi
 if [[ "$_norm_ok" -eq 0 ]]; then
   _lex="$(lexical_norm "$resolved" 2>/dev/null || true)"
@@ -164,10 +213,9 @@ if [[ "$_norm_ok" -eq 0 ]]; then
   block "[write-hook] BLOCKED: cannot normalize path; approval protection cannot be evaluated (rule:approvals)."
 fi
 
-# Resolve the platform and the case-folded fleet root ONCE. This hook is on the
-# PreToolUse hot path: every Write/Edit pays it, and the audit measured a median of
-# ~872ms per decision, largely from re-forking `uname` and `tr` per protected prefix
-# (audit #34). Bash string ops replace the `tr` pipeline entirely.
+# uname is cached once. Darwin bash 3.2 has no ${var,,}, so casefold forks `tr`.
+# 2026-10-21, bash 3.2.57: 2.3 ms per fork. A miss in is_protected is 1 path
+# fold plus 14 path_matches × 2, about 29 forks (tens of ms). The 5s timeout stays.
 if [[ "${_IS_DARWIN_CACHED:-}" != "1" ]]; then
   if [[ "$(uname -s)" == Darwin ]]; then _IS_DARWIN=1; else _IS_DARWIN=0; fi
   _IS_DARWIN_CACHED=1
@@ -229,6 +277,10 @@ is_protected() {
     # .git holds executable configuration: config can name diff/textconv helpers and
     # .git/hooks runs on ordinary git operations.
     path_matches "$p" "${FLEET_ROOT}/.git" && return 0
+    # Grok loads config.toml and hooks from this tree. An attributed agent
+    # must not rewrite the gate. The main session still can (agent is empty
+    # here, so this block is skipped).
+    path_matches "$p" "$_CANON_GROK" && return 0
     local settings_real
     for settings_real in "$_CANON_SETTINGS_1" "$_CANON_SETTINGS_2"; do
       path_matches "$p" "$settings_real" && return 0

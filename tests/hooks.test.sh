@@ -328,12 +328,17 @@ if [ -f "$SETTINGS" ] && command -v python3 >/dev/null 2>&1 && python3 -c 'impor
   if python3 - "$SETTINGS" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
-hooks = [h for h in d['hooks']['PreToolUse'] if h.get('matcher') == 'Bash']
-cmds = [x.get('command', '') for h in hooks for x in h.get('hooks', [])]
-sys.exit(0 if any('restrict-bash-by-agent.sh' in c for c in cmds) else 1)
+hooks = [
+    x
+    for h in d['hooks']['PreToolUse']
+    if h.get('matcher') == 'Bash'
+    for x in h.get('hooks', [])
+    if 'restrict-bash-by-agent.sh' in x.get('command', '')
+]
+sys.exit(0 if len(hooks) == 1 and hooks[0].get('timeout') == 5 else 1)
 PY
   then
-    PASS=$((PASS + 1)); echo "PASS  settings.json registers restrict-bash hook"
+    PASS=$((PASS + 1)); echo "PASS  settings.json registers restrict-bash hook with timeout 5"
   else
     FAIL=$((FAIL + 1)); echo "FAIL  settings.json does not register restrict-bash hook"
   fi
@@ -397,16 +402,160 @@ else
   FAIL=$((FAIL + 1)); echo "FAIL  e2e-runner tool_input.path cannot rewrite bash gate (exit=$rc, want=2) :: $(printf '%s' "$out" | head -1)"
 fi
 
+# Grok PreToolUse is camelCase. Snake_case cases above stay the Claude contract.
+# Absent identity stays main-session. A blank or non-object snake_case field must
+# not hide subagentType / toolInput.
+wt_payload() {
+  local desc="$1" payload="$2" exp="$3" rc out
+  out="$(printf '%s' "$payload" | "${HOOK_ENV[@]}" HOOK_LIB_DIR="$FLEET_FAKE/hooks/lib" bash "$WRITE_HOOK" 2>&1)"
+  rc=$?
+  if [ "$rc" -eq "$exp" ]; then
+    PASS=$((PASS + 1)); echo "PASS  $desc"
+  else
+    FAIL=$((FAIL + 1)); echo "FAIL  $desc (exit=$rc, want=$exp) :: $(printf '%s' "$out" | head -1)"
+  fi
+}
+
+bt_payload "grok camelCase e2e-runner git status allowed" \
+  "$(jq -nc '{subagentType:"e2e-runner", sessionId:"grok-session", toolInput:{command:"git status"}}')" 0
+bt_payload "grok camelCase e2e-runner rm denied" \
+  "$(jq -nc '{subagentType:"e2e-runner", toolInput:{command:"rm -rf /tmp/x"}}')" 2
+bt_payload "grok camelCase code-reviewer bash denied" \
+  "$(jq -nc '{subagentType:"code-reviewer", toolInput:{command:"git status"}}')" 2
+bt_payload "grok camelCase without identity passes as main session" \
+  "$(jq -nc '{toolInput:{command:"rm -rf /tmp/x"}}')" 0
+bt_payload "boolean tool_input does not hide camelCase command" \
+  "$(jq -nc '{tool_input:true, subagentType:"code-reviewer", toolInput:{command:"git status"}}')" 2
+bt_payload "blank agent_type does not hide subagentType" \
+  "$(jq -nc '{agent_type:"", subagentType:"code-reviewer", toolInput:{command:"ls"}}')" 2
+bt_payload "conflicting identity fields denied" \
+  "$(jq -nc '{agent_type:"e2e-runner", subagentType:"code-reviewer", tool_input:{command:"ls"}}')" 2
+bt_payload "conflicting command fields denied" \
+  "$(jq -nc '{agent_type:"e2e-runner", tool_input:{command:"git status"}, toolInput:{command:"rm -rf /tmp/x"}}')" 2
+mint_approval snapshots
+bt_payload "grok camelCase sessionId consumes a bound approval" \
+  "$(jq -nc --arg s "$TEST_SESSION" '{sessionId:$s, subagentType:"e2e-runner", toolInput:{command:"playwright test --update-snapshots"}}')" \
+  0 "BASE_URL=http://localhost:3000"
+
+wt_payload "grok camelCase e2e-runner cannot rewrite bash gate" \
+  "$(jq -nc --arg p "$FLEET_FAKE/hooks/restrict-bash-by-agent.sh" --arg c "$TEST_CWD" \
+      '{subagentType:"e2e-runner", cwd:$c, toolInput:{file_path:$p}}')" 2
+wt_payload "grok camelCase without identity can edit bash gate" \
+  "$(jq -nc --arg p "$FLEET_FAKE/hooks/restrict-bash-by-agent.sh" --arg c "$TEST_CWD" \
+      '{cwd:$c, toolInput:{file_path:$p}}')" 0
+wt_payload "attributed write missing path denied" \
+  "$(jq -nc '{agent_type:"e2e-runner", tool_input:{}}')" 2
+wt_payload "main session missing path allowed" \
+  "$(jq -nc '{tool_input:{}}')" 0
+wt_payload "boolean tool_input does not hide protected toolInput path" \
+  "$(jq -nc --arg p "$FLEET_FAKE/hooks/restrict-bash-by-agent.sh" \
+      '{tool_input:true, subagentType:"e2e-runner", toolInput:{file_path:$p}}')" 2
+wt_payload "conflicting write paths denied" \
+  "$(jq -nc --arg safe "/tmp/other-app/ok.txt" --arg bad "$FLEET_FAKE/hooks/restrict-bash-by-agent.sh" \
+      '{agent_type:"e2e-runner", tool_input:{file_path:$safe}, toolInput:{file_path:$bad}}')" 2
+
+NOJQ="$TMPD/write-nojq"
+mkdir -p "$NOJQ"
+for b in bash sh grep sed awk tr cat env head cut uname dirname basename python3 mktemp rm date; do
+  src="$(command -v "$b" 2>/dev/null)" && ln -sf "$src" "$NOJQ/$b"
+done
+# C14: ~/.grok/skills is a symlink. normpath-before-realpath turns
+# skills/temu-copywriter/../../.claude/settings.json into ~/.grok/.claude/settings.json
+# and misses the real settings file. realpath on the raw path must deny it.
+SKILL_REAL="$TEST_HOME/skills/temu-copywriter"
+AGENTS_SKILLS="$TEST_HOME/.agents/skills"
+mkdir -p "$SKILL_REAL" "$AGENTS_SKILLS" "$TEST_HOME/.grok"
+ln -s "$SKILL_REAL" "$AGENTS_SKILLS/temu-copywriter"
+ln -s "$AGENTS_SKILLS" "$TEST_HOME/.grok/skills"
+wt "e2e-runner symlink .. into live settings is denied" "e2e-runner" \
+  "$TEST_HOME/.grok/skills/temu-copywriter/../../.claude/settings.json" 2
+# The case above sits inside ~/.grok, so the whole-tree rule denies it even if
+# normpath runs before realpath. This alias is outside every protected prefix;
+# only physical resolution reaches live settings.
+mkdir -p "$TEST_HOME/.claude/hooks" "$TEST_HOME/jump"
+ln -s "$TEST_HOME/.claude/hooks" "$TEST_HOME/jump/link"
+wt "symlink outside protected prefixes still resolves into live settings" "e2e-runner" \
+  "$TEST_HOME/jump/link/../../.claude/settings.json" 2
+mkdir -p "$TEST_HOME/.grok/hooks"
+wt "e2e-runner cannot write grok config.toml" "e2e-runner" "$TEST_HOME/.grok/config.toml" 2
+wt "e2e-runner cannot write grok hooks" "e2e-runner" "$TEST_HOME/.grok/hooks/agent-gates.json" 2
+wt "main session can edit grok config.toml" "" "$TEST_HOME/.grok/config.toml" 0
+wt "main session can edit grok hooks" "" "$TEST_HOME/.grok/hooks/agent-gates.json" 0
+nl_path="${TEST_HOME}/.grok/foo"$'\n'"bar"
+wt_payload "newline inside .grok is denied" \
+  "$(jq -nc --arg p "$nl_path" '{agent_type:"e2e-runner", tool_input:{file_path:$p}}')" 2
+wt_payload "non-string agent_type cannot edit the bash gate" \
+  "$(jq -nc --arg p "$FLEET_FAKE/hooks/restrict-bash-by-agent.sh" '{agent_type:17, tool_input:{file_path:$p}}')" 2
+wt_payload "concatenated JSON is denied" \
+  "$(printf '%s%s' \
+      "$(jq -nc '{agent_type:"e2e-runner", tool_input:{file_path:"/tmp/ok.txt"}}')" \
+      "$(jq -nc --arg p "$FLEET_FAKE/hooks/restrict-bash-by-agent.sh" '{agent_type:"e2e-runner", tool_input:{file_path:$p}}')")" 2
+
+NOPY="$TMPD/write-nopy"
+mkdir -p "$NOPY"
+for b in bash sh grep sed awk tr cat env head cut uname dirname basename jq mktemp rm date; do
+  src="$(command -v "$b" 2>/dev/null)" && ln -sf "$src" "$NOPY/$b"
+done
+if [ -e "$NOPY/python3" ]; then
+  FAIL=$((FAIL + 1)); echo "FAIL  write no-python PATH stub still contains python3"
+else
+  out="$(printf '%s' "$(jq -nc --arg p "/tmp/other-app/ok.txt" '{agent_type:"e2e-runner", tool_input:{file_path:$p}}')" | env -i PATH="$NOPY" HOME="$TEST_HOME" TMPDIR="$TMPD" CLAUDE_CONFIG_DIR="$TEST_CONFIG" HOOK_LIB_DIR="$FLEET_FAKE/hooks/lib" bash "$WRITE_HOOK" 2>&1)"
+  rc=$?
+  if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'rule:realpath'; then
+    PASS=$((PASS + 1)); echo "PASS  attributed write without python3 is denied"
+  else
+    FAIL=$((FAIL + 1)); echo "FAIL  attributed write without python3 (exit=$rc, want=2) :: $(printf '%s' "$out" | head -1)"
+  fi
+  out="$(printf '%s' "$(jq -nc --arg p "/tmp/other-app/ok.txt" '{tool_input:{file_path:$p}}')" | env -i PATH="$NOPY" HOME="$TEST_HOME" TMPDIR="$TMPD" CLAUDE_CONFIG_DIR="$TEST_CONFIG" HOOK_LIB_DIR="$FLEET_FAKE/hooks/lib" bash "$WRITE_HOOK" 2>&1)"
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    PASS=$((PASS + 1)); echo "PASS  main session write without python3 still allowed"
+  else
+    FAIL=$((FAIL + 1)); echo "FAIL  main session write without python3 (exit=$rc, want=0) :: $(printf '%s' "$out" | head -1)"
+  fi
+fi
+
+if [ -e "$NOJQ/jq" ]; then
+  FAIL=$((FAIL + 1)); echo "FAIL  write no-jq PATH stub still contains jq"
+else
+  out="$(printf '%s' '{"subagentType":"e2e-runner","toolInput":{"file_path":"/tmp/x"}}' | env -i PATH="$NOJQ" HOME="$TEST_HOME" TMPDIR="$TMPD" CLAUDE_CONFIG_DIR="$TEST_CONFIG" HOOK_LIB_DIR="$FLEET_FAKE/hooks/lib" bash "$WRITE_HOOK" 2>&1)"
+  rc=$?
+  if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'jq unavailable'; then
+    PASS=$((PASS + 1)); echo "PASS  write hook no-jq camelCase subagentType fails closed"
+  else
+    FAIL=$((FAIL + 1)); echo "FAIL  write hook no-jq camelCase subagentType (exit=$rc, want=2) :: $(printf '%s' "$out" | head -1)"
+  fi
+  out="$(printf '%s' "{\"tool_input\":{\"file_path\":\"$FLEET_FAKE/hooks/approvals/with-deps\"}}" | env -i PATH="$NOJQ" HOME="$TEST_HOME" TMPDIR="$TMPD" CLAUDE_CONFIG_DIR="$TEST_CONFIG" HOOK_LIB_DIR="$FLEET_FAKE/hooks/lib" bash "$WRITE_HOOK" 2>&1)"
+  rc=$?
+  if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'jq unavailable'; then
+    PASS=$((PASS + 1)); echo "PASS  write hook no-jq unattributed approvals denied"
+  else
+    FAIL=$((FAIL + 1)); echo "FAIL  write hook no-jq unattributed approvals (exit=$rc, want=2) :: $(printf '%s' "$out" | head -1)"
+  fi
+  out="$(printf '%s' '{"tool_input":{"file_path":"/tmp/ordinary.txt"}}' | env -i PATH="$NOJQ" HOME="$TEST_HOME" TMPDIR="$TMPD" CLAUDE_CONFIG_DIR="$TEST_CONFIG" HOOK_LIB_DIR="$FLEET_FAKE/hooks/lib" bash "$WRITE_HOOK" 2>&1)"
+  rc=$?
+  if [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q 'jq unavailable'; then
+    PASS=$((PASS + 1)); echo "PASS  write hook no-jq unattributed ordinary path denied"
+  else
+    FAIL=$((FAIL + 1)); echo "FAIL  write hook no-jq unattributed ordinary path (exit=$rc, want=2) :: $(printf '%s' "$out" | head -1)"
+  fi
+fi
+
 if [ -f "$SETTINGS" ] && command -v python3 >/dev/null 2>&1 && python3 -c 'import json' 2>/dev/null; then
   if python3 - "$SETTINGS" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
-hooks = [h for h in d.get("hooks", {}).get("PreToolUse", []) if "Write" in h.get("matcher", "")]
-cmds = [x.get("command", "") for h in hooks for x in h.get("hooks", [])]
-sys.exit(0 if any("restrict-mutator-write.sh" in c for c in cmds) else 1)
+hooks = [
+    x
+    for h in d.get("hooks", {}).get("PreToolUse", [])
+    if h.get("matcher") == "Write|Edit"
+    for x in h.get("hooks", [])
+    if "restrict-mutator-write.sh" in x.get("command", "")
+]
+sys.exit(0 if len(hooks) == 1 and hooks[0].get("timeout") == 5 else 1)
 PY
   then
-    PASS=$((PASS + 1)); echo "PASS  settings.json registers restrict-mutator-write hook"
+    PASS=$((PASS + 1)); echo "PASS  settings.json registers restrict-mutator-write hook with timeout 5"
   else
     FAIL=$((FAIL + 1)); echo "FAIL  settings.json does not register restrict-mutator-write hook"
   fi

@@ -160,6 +160,15 @@ assert_file_missing() {
   fi
 }
 
+assert_regular_file() {
+  local desc="$1" path="$2"
+  if [ -f "$path" ] && [ ! -L "$path" ]; then
+    pass "$desc"
+  else
+    fail "$desc :: regular file missing ($path)"
+  fi
+}
+
 assert_reserved_file() {
   local desc="$1" path="$2"
   if python3 - "$path" <<'PY'
@@ -195,6 +204,22 @@ assert_rc "non-xixi Write passes through" 0
 # 1b. missing agent_type is treated as main-session pass-through (CONTRACT.md attribution prerequisite)
 run_hook "$HOOK_DIR/restrict-write.sh" '{"tool_input":{"file_path":"/tmp/not-sandbox"}}'
 assert_rc "missing agent_type Write passes through" 0
+
+# Grok sends subagentType + toolInput. A boolean tool_input must not hide it.
+run_hook "$HOOK_DIR/restrict-write.sh" "$(jq -nc '{subagentType:"_xixi", toolInput:{file_path:"/tmp/evil-grok"}}')"
+assert_rc "grok camelCase _xixi outside sandbox is denied" 2
+alloc_tracked path xixi-prompt
+run_hook "$HOOK_DIR/restrict-write.sh" "$(jq -nc --arg p "$path" '{subagentType:"_xixi", toolInput:{file_path:$p}}')"
+assert_rc "grok camelCase _xixi fresh sandbox path reserves" 0
+assert_reserved_file "grok camelCase reserve leaves a safe inode" "$path"
+run_hook "$HOOK_DIR/restrict-write.sh" '{"toolInput":{"file_path":"/tmp/not-sandbox"}}'
+assert_rc "grok camelCase without identity passes through" 0
+run_hook "$HOOK_DIR/restrict-write.sh" '{"tool_input":true,"subagentType":"_xixi","toolInput":{"file_path":"/tmp/evil-grok"}}'
+assert_rc "boolean tool_input does not hide camelCase _xixi path" 2
+run_hook "$HOOK_DIR/restrict-write.sh" '{"agent_type":"","subagentType":"_xixi","toolInput":{"file_path":"/tmp/evil-grok"}}'
+assert_rc "blank agent_type does not hide subagentType _xixi" 2
+run_hook "$HOOK_DIR/restrict-write.sh" '{"agent_type":"e2e-runner","subagentType":"_xixi","tool_input":{"file_path":"/tmp/evil-grok"}}'
+assert_rc "conflicting identity fields are denied" 2
 
 # 2. _xixi allowed path missing -> reserve + validate inode
 alloc_tracked path xixi-prompt
@@ -247,28 +272,135 @@ run_hook "$BROKEN_RESTRICT_DIR/restrict-write.sh" "$(write_payload "_xixi" "$pat
 assert_rc "restrict-write missing common.sh blocks" 2
 
 # 10. settings.json registers both xixi Write hooks
+# PreToolUse restrict-write shares the other fleet gates' 5s bound.
+# PostToolUse copy-on-write is 15s: it runs python and the clipboard helper,
+# and both hosts otherwise leave this command hook at their 600s default.
 if [ -f "$SETTINGS" ] && python3 - "$SETTINGS" <<'PY'
 import json, sys
 
 settings = json.load(open(sys.argv[1]))
-pre = [
-    hook.get("command", "")
+
+import shlex
+
+def command_is_script(hook, script):
+    if hook.get("type") not in (None, "command"):
+        return False
+    words = shlex.split(hook.get("command", ""))
+    if len(words) != 1:
+        return False
+    word = words[0]
+    return word == script or word.endswith("/" + script)
+
+def fleet(event, matcher, script):
+    return [
+        hook
+        for rule in settings.get("hooks", {}).get(event, [])
+        if rule.get("matcher") == matcher
+        for hook in rule.get("hooks", [])
+        if command_is_script(hook, script)
+    ]
+
+pre = fleet("PreToolUse", "Write", "restrict-write.sh")
+post = fleet("PostToolUse", "Write", "copy-on-write.sh")
+ok = (
+    len(pre) == 1 and pre[0].get("timeout") == 5
+    and len(post) == 1 and post[0].get("timeout") == 15
+)
+sys.exit(0 if ok else 1)
+PY
+then
+  pass "settings.json registers both _xixi Write hooks with timeouts 5 and 15"
+else
+  fail "settings.json missing _xixi Write hook registration or timeout (SETTINGS=$SETTINGS)"
+fi
+
+GROK_GATES="${GROK_GATES:-$HOME/.grok/hooks/agent-gates.json}"
+if [ ! -f "$GROK_GATES" ]; then
+  pass "agent-gates.json absent; xixi timeout check skipped"
+elif python3 - "$GROK_GATES" <<'PY'
+import json, re, shlex, sys
+
+doc = json.load(open(sys.argv[1]))
+
+def command_is_script(hook, script):
+    if hook.get("type") not in (None, "command"):
+        return False
+    words = shlex.split(hook.get("command", ""))
+    if len(words) != 1:
+        return False
+    word = words[0]
+    return word == script or word.endswith("/" + script)
+
+def one(event, script, timeout):
+    hits = []
+    for rule in doc.get("hooks", {}).get(event, []):
+        matcher = rule.get("matcher", "")
+        try:
+            covers_write = bool(re.fullmatch(matcher, "Write") or re.fullmatch(matcher, "write"))
+        except re.error:
+            covers_write = False
+        if not covers_write:
+            continue
+        for hook in rule.get("hooks", []):
+            if command_is_script(hook, script):
+                hits.append(hook)
+    return len(hits) == 1 and hits[0].get("timeout") == timeout
+
+sys.exit(0 if one("PreToolUse", "restrict-write.sh", 5) and one("PostToolUse", "copy-on-write.sh", 15) else 1)
+PY
+then
+  pass "agent-gates.json sets xixi hook timeouts 5 and 15"
+else
+  fail "agent-gates.json xixi hooks missing timeout 5 and 15 (GROK_GATES=$GROK_GATES)"
+fi
+
+BAD_SETTINGS="$TMPD/echo-registration.json"
+cat > "$BAD_SETTINGS" <<'EOF'
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo restrict-write.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/agents/hooks/xixi/copy-on-write.sh",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
+EOF
+if python3 - "$BAD_SETTINGS" <<'PY'
+import json, shlex, sys
+settings = json.load(open(sys.argv[1]))
+hooks = [
+    hook
     for rule in settings.get("hooks", {}).get("PreToolUse", [])
     if rule.get("matcher") == "Write"
     for hook in rule.get("hooks", [])
 ]
-post = [
-    hook.get("command", "")
-    for rule in settings.get("hooks", {}).get("PostToolUse", [])
-    if rule.get("matcher") == "Write"
-    for hook in rule.get("hooks", [])
-]
-sys.exit(0 if any("restrict-write.sh" in c for c in pre) and any("copy-on-write.sh" in c for c in post) else 1)
+words = shlex.split(hooks[0].get("command", "")) if hooks else []
+sys.exit(0 if len(words) == 1 and (words[0] == "restrict-write.sh" or words[0].endswith("/restrict-write.sh")) else 1)
 PY
 then
-  pass "settings.json registers both _xixi Write hooks"
+  fail "registration check accepted echo restrict-write.sh"
 else
-  fail "settings.json missing _xixi Write hook registration (SETTINGS=$SETTINGS)"
+  pass "registration check rejects echo restrict-write.sh"
 fi
 
 # 11. copy-on-write non-xixi path shape -> no status
@@ -314,6 +446,42 @@ run_hook "$BROKEN_COPY_DIR/copy-on-write.sh" "$(write_payload "_xixi" "/tmp/xixi
 assert_rc "copy-on-write missing common.sh exits 0" 0
 assert_output_contains "copy-on-write missing common.sh emits warning" "common.sh missing"
 
+# discard_xixi_temp may rm /tmp/xixi-prompt-<8 alnum> only after jq parses exactly
+# one object whose top-level identity is _xixi or xixi and whose tool path is that
+# file. A nested name, another agent, or an unparsed payload leaves the file.
+alloc_tracked path xixi-prompt
+printf 'other agent\n' > "$path"
+run_hook "$BROKEN_COPY_DIR/copy-on-write.sh" "$(write_payload "e2e-runner" "$path")"
+assert_rc "copy-on-write non-xixi missing common.sh exits 0" 0
+assert_regular_file "copy-on-write non-xixi missing common.sh leaves the temp file" "$path"
+
+alloc_tracked path xixi-prompt
+printf 'no identity\n' > "$path"
+run_hook "$HOOK_DIR/copy-on-write.sh" "$(jq -nc --arg p "$path" '[{file_path:$p}]')"
+assert_rc "copy-on-write non-object without identity exits 0" 0
+assert_regular_file "copy-on-write non-object without identity leaves the temp file" "$path"
+
+alloc_tracked path xixi-prompt
+printf 'named xixi\n' > "$path"
+run_hook "$BROKEN_COPY_DIR/copy-on-write.sh" "$(write_payload "_xixi" "$path")"
+assert_file_missing "copy-on-write _xixi missing common.sh still removes the temp file" "$path"
+
+alloc_tracked path xixi-prompt
+printf 'camel xixi\n' > "$path"
+run_hook "$BROKEN_COPY_DIR/copy-on-write.sh" "$(jq -nc --arg p "$path" '{subagentType:"xixi", toolInput:{file_path:$p}}')"
+assert_file_missing "copy-on-write bare xixi camelCase missing common.sh still removes the temp file" "$path"
+
+alloc_tracked path xixi-prompt
+printf 'path alias\n' > "$path"
+run_hook "$BROKEN_COPY_DIR/copy-on-write.sh" "$(jq -nc --arg p "$path" '{agent_type:"_xixi", tool_input:{path:$p}}')"
+assert_file_missing "copy-on-write path alias missing common.sh still removes the temp file" "$path"
+
+alloc_tracked path xixi-prompt
+printf 'nested identity\n' > "$path"
+run_hook "$BROKEN_COPY_DIR/copy-on-write.sh" "$(jq -nc --arg p "$path" '{agent_type:"e2e-runner", metadata:{subagentType:"_xixi"}, tool_input:{file_path:$p}}')"
+assert_rc "copy-on-write nested identity exits 0" 0
+assert_regular_file "copy-on-write nested identity does not remove the temp file" "$path"
+
 # --- Dependency/failure matrix (audit #32) ------------------------------------
 # A restricted PATH is the ENTIRE child PATH, never prepended to the real one.
 # The complete control proves that a probe cannot pass because another dependency
@@ -348,6 +516,10 @@ pre_failure() {
 alloc_tracked path xixi-prompt
 pre_failure "restrict missing jq" "$HOOK_DIR/restrict-write.sh" \
   "$(write_payload _xixi "$path")" "jq unavailable" "PATH=$TMPD/no-jq"
+alloc_tracked path xixi-prompt
+pre_failure "restrict missing jq camelCase" "$HOOK_DIR/restrict-write.sh" \
+  "$(jq -nc --arg p "$path" '{subagentType:"_xixi", toolInput:{file_path:$p}}')" \
+  "jq unavailable" "PATH=$TMPD/no-jq"
 alloc_tracked path xixi-prompt
 pre_failure "restrict missing python3" "$HOOK_DIR/restrict-write.sh" \
   "$(write_payload _xixi "$path")" "could not exclusively create target" "PATH=$TMPD/no-python"
@@ -393,7 +565,11 @@ post_failure() {
   else
     fail "$desc missing fallback for '$reason' :: $RUN_OUT"
   fi
-  assert_file_missing "$desc cleans temp file" "$path"
+  if [[ "${KEEP_TEMP:-}" == 1 ]]; then
+    assert_regular_file "$desc leaves the temp file" "$path"
+  else
+    assert_file_missing "$desc cleans temp file" "$path"
+  fi
   assert_file_missing "$desc writes nothing to clipboard" "$COPIED_OUT"
 }
 
@@ -413,7 +589,7 @@ fi
 
 alloc_tracked path xixi-prompt
 printf 'prompt\n' > "$path"
-post_failure "copy missing jq" "$HOOK_DIR/copy-on-write.sh" \
+KEEP_TEMP=1 post_failure "copy missing jq" "$HOOK_DIR/copy-on-write.sh" \
   "$(write_payload _xixi "$path")" "jq missing" "PATH=$TMPD/no-jq"
 alloc_tracked path xixi-prompt
 printf 'prompt\n' > "$path"
@@ -421,7 +597,7 @@ post_failure "copy missing python3" "$HOOK_DIR/copy-on-write.sh" \
   "$(write_payload _xixi "$path")" "python3 unavailable" "PATH=$TMPD/no-python"
 alloc_tracked path xixi-prompt
 printf 'prompt\n' > "$path"
-post_failure "copy wrong JSON type (array)" "$HOOK_DIR/copy-on-write.sh" \
+KEEP_TEMP=1 post_failure "copy wrong JSON type (array)" "$HOOK_DIR/copy-on-write.sh" \
   "[$(write_payload _xixi "$path")]" "JSON object"
 alloc_tracked path xixi-prompt
 printf 'prompt\n' > "$path"
@@ -483,6 +659,44 @@ assert_rc "attribution: absent agent_type passes through as main session" 0
 # so the distinction stays visible.
 run_hook "$HOOK_DIR/restrict-write.sh" "$(write_payload "_xixi" "/etc/passwd")"
 assert_rc "attribution: sandbox denial is path-based, not extension-based" 2
+
+run_hook "$HOOK_DIR/restrict-write.sh" "$(jq -nc '{agent_type:17, tool_input:{file_path:"/tmp/xixi-prompt-AbC123xy"}}')"
+assert_rc "attribution: non-string agent_type is denied" 2
+
+run_hook "$HOOK_DIR/restrict-write.sh" "$(printf '%s%s' \
+  "$(jq -nc '{agent_type:"e2e-runner", tool_input:{file_path:"/tmp/outside.txt"}}')" \
+  "$(jq -nc '{agent_type:"_xixi", tool_input:{file_path:"/etc/passwd"}}')")"
+assert_rc "attribution: concatenated JSON is denied" 2
+
+alloc_tracked path xixi-prompt
+printf 'camelCase prompt\n' > "$path"
+rm -f -- "$COPIED_OUT"
+run_hook "$HOOK_DIR/copy-on-write.sh" "$(jq -nc --arg p "$path" '{subagentType:"_xixi", toolInput:{file_path:$p}}')"
+assert_rc "copy-on-write camelCase exits 0" 0
+assert_output_contains "copy-on-write camelCase emits success" "✅ refined prompt copied to clipboard"
+if [ -f "$COPIED_OUT" ] && [ "$(cat "$COPIED_OUT")" = "camelCase prompt" ]; then
+  pass "copy-on-write camelCase copies the prompt bytes"
+else
+  fail "copy-on-write camelCase did not copy the prompt bytes"
+fi
+assert_file_missing "copy-on-write camelCase unlinks temp file" "$path"
+
+alloc_tracked path xixi-prompt
+printf 'hidden toolInput prompt\n' > "$path"
+rm -f -- "$COPIED_OUT"
+run_hook "$HOOK_DIR/copy-on-write.sh" "$(jq -nc --arg p "$path" '{tool_input:true, subagentType:"_xixi", toolInput:{file_path:$p}}')"
+assert_rc "copy-on-write boolean tool_input exits 0" 0
+assert_output_contains "copy-on-write boolean tool_input still copies" "✅ refined prompt copied to clipboard"
+if [ -f "$COPIED_OUT" ] && [ "$(cat "$COPIED_OUT")" = "hidden toolInput prompt" ]; then
+  pass "copy-on-write boolean tool_input copies the prompt bytes"
+else
+  fail "copy-on-write boolean tool_input did not copy the prompt bytes"
+fi
+assert_file_missing "copy-on-write boolean tool_input unlinks temp file" "$path"
+
+run_hook "$HOOK_DIR/copy-on-write.sh" "$(jq -nc --arg p "/tmp/xixi-prompt-AbC123xy" '{agent_type:"e2e-runner", subagentType:"_xixi", tool_input:{file_path:$p}, toolInput:{file_path:"/tmp/xixi-prompt-ZzZzZzZz"}}')"
+assert_rc "copy-on-write field conflict exits 0" 0
+assert_output_contains "copy-on-write field conflict warns" "conflicting snake_case and camelCase fields"
 
 echo
 echo "==> result: $PASS passed, $FAIL failed"

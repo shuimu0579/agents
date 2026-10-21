@@ -12,9 +12,10 @@ registration to be present.
 |---|---|---|
 | Bash (macOS ships 3.2 — the hooks target it) | everything | nothing runs |
 | `jq` | both PreToolUse gates, `_xixi` hooks | **the gates deny every attributed event** (fail closed) |
-| `python3` | path canonicalization, `_xixi` inode checks | falls back to lexical normalization; `_xixi` copy refuses |
+| `python3` | path canonicalization, `_xixi` inode checks | attributed writes deny (lexical `..` is not trusted); main-session approval checks still use lexical normalization; `_xixi` copy refuses |
 | `pbcopy` / `wl-copy` / `xclip` | `_xixi` clipboard delivery | delivery reports `⚠️ failed`; refinement still returned |
-| Hook registration in `~/.claude/settings.json` | all four hooks | **agents are unconstrained and every suite still passes** |
+| Hook registration in `~/.claude/settings.json` | Claude, all four hooks | **agents are unconstrained and every suite still passes** |
+| Hook registration in `~/.grok/hooks/agent-gates.json` | Grok (`compat.claude.hooks` is off, so the Claude file is not loaded) | same: unregistered hooks constrain nothing |
 | Codex + a current `~/.codex/agents/*.toml` mirror | Codex-side dispatch | Codex runs a stale agent definition |
 | Playwright (optional) | `e2e-runner` templates | the **orchestrator** runs it; the agent has no execution (ADR 0002) |
 
@@ -64,8 +65,10 @@ bash tests/run_all.sh
 
 Registration and dependency presence are the two failure modes the test suites cannot
 catch on their own: an unregistered hook leaves every suite green while constraining
-nothing. See `hooks/xixi/CONTRACT.md` for the one check that still has to be done by
-hand — whether the host stamps `agent_type` on subagent Write events.
+nothing. The hooks accept `agent_type` or `subagentType`, and `tool_input` or
+`toolInput`. An event with neither identity field is still main-session pass-through.
+See `hooks/xixi/CONTRACT.md` for the check that still has to be done by hand — whether
+the host stamps one of those identity fields on subagent Write events.
 
 ## Active Agents
 

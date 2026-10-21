@@ -6,7 +6,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/agents/hooks/xixi/copy-on-write.sh"
+            "command": "~/.claude/agents/hooks/xixi/copy-on-write.sh",
+            "timeout": 15
           }
         ]
       }
@@ -37,7 +38,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/agents/hooks/xixi/restrict-write.sh"
+            "command": "~/.claude/agents/hooks/xixi/restrict-write.sh",
+            "timeout": 5
           }
         ]
       }
