@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # run_all.sh — Unified Test Runner for Claude Code Agent Fleet
-# Runs Guardrails, Hooks Test, Xixi Hooks Test, and Hook E2E in strict mode.
+# Runs every suite registered below with run_suite and fails if any suite fails.
+# Only Guardrails is invoked in strict mode (--strict).
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"

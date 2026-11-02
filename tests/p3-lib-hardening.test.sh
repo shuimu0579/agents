@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 #
-# p3-lib-hardening.test.sh — RED probes for the P3 hooks/lib hardening findings
+# p3-lib-hardening.test.sh — regression probes for the P3 hooks/lib hardening findings
 # (#20, #23, #24, #25 of the 2026-09-09 audit).
 #
-# Each probe asserts an invariant the library does not yet hold. They are expected
-# to FAIL until the corresponding fix lands.
+# The audit marks all four fixed; every probe must pass. A probe covers only the
+# scenario it builds (e.g. #20 uses an unbound token; #25 a pre-placed symlink, not
+# the check-then-open race), so a pass does not prove a finding is fully closed.
+# The comment above each probe describes the defect as audited.
 #
 set -uo pipefail
 
