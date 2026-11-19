@@ -6,6 +6,8 @@
 #   mutator      → Bash requires the declared Bash tool; the legacy allowlist applies
 #   executor     → Bash requires the declared Bash tool AND the execution-only
 #                  allowlist in hooks/lib/executor.sh (ADR 0006)
+#   orchestrator → Write/Edit plus the executor allowlist with standing git write
+#                  authority, including push/reset/clean (ADR 0007)
 # Self-protection at the Bash layer is best-effort, not a sandbox: accepted residual
 # recorded in ADR 0006. The Write/Edit layer keeps absolute self-protection.
 #
@@ -61,6 +63,7 @@ cmd=""
 agent=""
 session_id=""
 EXECUTOR=0
+ORCHESTRATOR=0
 
 observe_attribution() {
   hook_observe_attribution "$agent"
@@ -180,6 +183,7 @@ case "$agent_policy" in
   # Executor roles (ADR 0006): write + run. The allowlist is applied after the
   # global deny rules; it never grants a generic shell.
   executor) EXECUTOR=1 ;;
+  orchestrator) ORCHESTRATOR=1 ;;
   "")
     # Absent from the contract. That is either an agent this fleet does not govern, or
     # a contract that has lost a row — and the two must not be confused (ADR 0005).
@@ -226,7 +230,14 @@ if ! sec_cmd_tokenize "$cmd"; then
   block "[bash-hook] BLOCKED: empty, ambiguous, or unsupported shell command (rule:no-shell-meta)." "no-shell-meta"
 fi
 if sec_cmd_is_destructive "${SEC_ARGV[@]}"; then
-  block "[bash-hook] BLOCKED: destructive command denied (rule:deny-destructive)." "deny-destructive"
+  # ADR 0007: the orchestrator holds standing authorization for git push/reset/clean;
+  # whether this particular argv is one of them is decided by exec_is_git_write below.
+  # Every other destructive command still denies.
+  if [[ "$ORCHESTRATOR" -eq 1 && "${SEC_ARGV[0]}" == git ]]; then
+    :
+  else
+    block "[bash-hook] BLOCKED: destructive command denied (rule:deny-destructive)." "deny-destructive"
+  fi
 fi
 if sec_cmd_is_network_or_escape "${SEC_ARGV[@]}"; then
   block "[bash-hook] BLOCKED: network/shell-escape/interpreter denied (rule:deny-escape)." "deny-escape"
@@ -275,11 +286,18 @@ allowed=0
 # legacy e2e-runner branch; nothing below may reset an allowed executor decision.
 # The main session exited above, and a review-only agent was blocked above, so
 # only an agent whose contract flag is `executor` can reach this block.
-if [[ "$EXECUTOR" -eq 1 ]]; then
-  declare -F exec_cmd_allowed >/dev/null 2>&1 ||
-    block "[bash-hook] BLOCKED: executor policy library missing (rule:lib)." "lib"
-  exec_cmd_allowed "$FLEET_ROOT_FOR_APPROVAL" "${SEC_ARGV[@]}" ||
-    block "[bash-hook] BLOCKED: command not on executor allowlist for $agent (rule:allowlist)." "allowlist"
+if [[ "$EXECUTOR" -eq 1 || "$ORCHESTRATOR" -eq 1 ]]; then
+  if [[ "$ORCHESTRATOR" -eq 1 ]]; then
+    declare -F exec_orchestrator_cmd_allowed >/dev/null 2>&1 ||
+      block "[bash-hook] BLOCKED: orchestrator policy library missing (rule:lib)." "lib"
+    exec_orchestrator_cmd_allowed "$FLEET_ROOT_FOR_APPROVAL" "${SEC_ARGV[@]}" ||
+      block "[bash-hook] BLOCKED: command not on orchestrator allowlist for $agent (rule:allowlist)." "allowlist"
+  else
+    declare -F exec_cmd_allowed >/dev/null 2>&1 ||
+      block "[bash-hook] BLOCKED: executor policy library missing (rule:lib)." "lib"
+    exec_cmd_allowed "$FLEET_ROOT_FOR_APPROVAL" "${SEC_ARGV[@]}" ||
+      block "[bash-hook] BLOCKED: command not on executor allowlist for $agent (rule:allowlist)." "allowlist"
+  fi
   allowed=1
 fi
 

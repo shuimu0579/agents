@@ -114,7 +114,8 @@ arrow order above.
 - Repo mutator (primary): `vorenus` (Read, Write, Edit, Bash, Grep, Glob). Only one repo mutator instance runs at a time.
 - Repo mutator (fallback): `pullo` (Read, Write, Edit, Bash, Grep, Glob) — only when `vorenus` is explicitly out of quota. Never take over on an ordinary timeout or error.
 - Ledger writer: `posca` (Read, Write, Edit, Bash, Grep, Glob) writes audit records only, not implementation.
-- Review-only (no Bash, may run in parallel): `anthory` (Read, Grep, Glob, Agent), `mark` (Read, Grep, Glob), `octavion` (Read, Grep, Glob), `atia` (Read, Grep, Glob).
+- Review-only (no Bash, may run in parallel): `mark` (Read, Grep, Glob), `octavion` (Read, Grep, Glob), `atia` (Read, Grep, Glob).
+- Orchestrator: `anthory` (Read, Write, Edit, Bash, Grep, Glob, Agent) — executor allowlist plus standing git write authority including `push`/`reset --hard`/`clean` (ADR 0007). Not a repo mutator: implementation still goes to `vorenus`/`pullo`.
 
 Every tool list above restates column 2 of `tests/fixtures/agent-contract.tsv`;
 that column is authoritative if the two ever disagree.

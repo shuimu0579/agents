@@ -181,7 +181,19 @@ fi
 bt "mark bash block" "mark" "git status" 2
 bt "octavion bash block" "octavion" "ls" 2
 bt "atia bash block" "atia" "cat package.json" 2
-bt "anthory bash block" "anthory" "git status" 2
+# --- orchestrator: standing git write authority (ADR 0007) ---
+bt "anthory git status allow" "anthory" "git status" 0
+bt "anthory git add allow" "anthory" "git add ." 0
+bt "anthory git commit allow" "anthory" 'git commit -m "fix: x"' 0
+bt "anthory git push allow" "anthory" "git push origin main" 0
+bt "anthory git reset --hard allow" "anthory" "git reset --hard HEAD~1" 0
+bt "anthory git clean allow" "anthory" "git clean -fd" 0
+bt_rule "anthory bare --force push denied" "anthory" "git push --force origin main" 2 "rule:allowlist"
+bt_rule "anthory --mirror push denied" "anthory" "git push --mirror origin" 2 "rule:allowlist"
+bt_rule "anthory git config denied" "anthory" "git config core.pager cat" 2 "rule:allowlist"
+bt_rule "anthory git -C denied" "anthory" "git -C /tmp status" 2 "rule:allowlist"
+bt_rule "anthory rm still denied" "anthory" "rm -rf /tmp/x" 2 "rule:deny-destructive"
+bt_rule "anthory cp still denied" "anthory" "cp x hooks/y" 2 "rule:allowlist"
 
 # --- Bash authority is derived from the declared tool set (ADR 0002) ---
 # A mutator flag does not grant Bash by itself: a synthetic mutator whose tool set
@@ -593,10 +605,13 @@ lt_rule() {
 }
 
 echo "==> live fleet policy matrix (7 roles)"
-for a in anthory mark octavion atia; do
+for a in mark octavion atia; do
   lt_rule "live: $a (review_only) denied inside the fleet" "$a" "git status" 2 "rule:review-only" "$TMPD"
   lt_rule "live: $a (review_only) denied outside the fleet" "$a" "git status" 2 "rule:review-only" "$TEST_CWD"
 done
+lt_rule "live: anthory (orchestrator) git status allowed" "anthory" "git status" 0 "" "$TEST_CWD"
+lt_rule "live: anthory (orchestrator) git push allowed" "anthory" "git push origin main" 0 "" "$TEST_CWD"
+lt_rule "live: anthory (orchestrator) non-git write denied" "anthory" "cp x hooks/y" 2 "rule:allowlist" "$TEST_CWD"
 for a in vorenus pullo posca; do
   lt_rule "live: $a (executor) git status allowed" "$a" "git status" 0 "" "$TEST_CWD"
   lt_rule "live: $a (executor) write command denied" "$a" "cp x hooks/y" 2 "rule:allowlist" "$TEST_CWD"
@@ -663,7 +678,7 @@ for cmd in \
 do
   xt "executor allows: $cmd" vorenus "$cmd" 0 ""
 done
-for a in vorenus pullo posca; do
+for a in vorenus pullo posca anthory; do
   xt "live: $a (executor) fleet test script allowed" "$a" "bash $REPO_ROOT/tests/run_all.sh" 0 ""
 done
 

@@ -136,7 +136,7 @@ status_sets_equal() {
 # ---------------------------------------------------------------------------
 # Contract fixture — the single source of truth for agents and the Bash hook.
 #   name|expected_tools|model|domain_statuses(;)|flag
-#   flag: review_only | mutator | executor
+#   flag: review_only | mutator | executor | orchestrator
 # ---------------------------------------------------------------------------
 if [[ -f "$AGENT_CONTRACT_FILE" ]]; then
   CONTRACT="$(grep -vE '^[[:space:]]*(#|$)' "$AGENT_CONTRACT_FILE" || true)"
@@ -236,6 +236,15 @@ while IFS='|' read -r name exp_tools exp_model domain_statuses flag; do
         fi
       done
       ;;
+    orchestrator)
+      # ADR 0007: coordination role holding standing git write authority. Same tool
+      # requirement as an executor: it writes files and runs commands.
+      for required in Write Edit Bash; do
+        if [[ -z "$actual_tools" ]] || ! has_tool "$actual_tools" "$required"; then
+          fail "$f: orchestrator missing required tool $required (ADR 0007)"
+        fi
+      done
+      ;;
     *)
       fail "$f: unknown contract flag '$flag' (fail-closed)"
       ;;
@@ -280,7 +289,7 @@ while IFS='|' read -r name exp_tools exp_model domain_statuses flag; do
 
   # 4c. reader injection preamble (grill F1) — every contract flag
   case "$flag" in
-    review_only|mutator|executor)
+    review_only|mutator|executor|orchestrator)
       if token_present "$f" "DATA, never instructions"; then
         note "$f: injection preamble present"
       else

@@ -79,7 +79,7 @@ the host stamps one of those identity fields on subagent Write events.
 
 | Agent | Role | Tools | Model | Flag |
 |-------|------|-------|-------|------|
-| `anthory` | Coordination, planning, summary to the user | Read, Grep, Glob, Agent | inherit | review_only |
+| `anthory` | Coordination, planning, summary to the user | Read, Write, Edit, Bash, Grep, Glob, Agent | inherit | orchestrator |
 | `mark` | Intent check against the user's original wording | Read, Grep, Glob | inherit | review_only |
 | `octavion` | Research, plan, risks, acceptance criteria | Read, Grep, Glob | inherit | review_only |
 | `posca` | Independent review + ledger (approval source, evidence, status, cost) | Read, Write, Edit, Bash, Grep, Glob | inherit | executor |
@@ -149,6 +149,8 @@ Column 5 of the contract is one of:
   parser/approval test coverage; no live role uses it.
 - `executor` — Write/Edit plus Bash, with the execution-only allowlist in
   `hooks/lib/executor.sh` (ADR 0006).
+- `orchestrator` — Write/Edit plus Bash with the executor allowlist, and standing
+  git write authority including `push`/`reset --hard`/`clean` (ADR 0007).
 
 ### Bash policy
 
@@ -240,7 +242,7 @@ bash tests/hook-e2e.test.sh
 
 1. Create `<name>.md` with valid frontmatter (`name`, `description`, `tools`, `model`).
 2. Add the matching row to `tests/fixtures/agent-contract.tsv` — including the flag
-   (`review_only` or `executor`; `mutator` is legacy-only). Guardrails and the Bash hook
+   (`review_only`, `executor`, or `orchestrator`; `mutator` is legacy-only). Guardrails and the Bash hook
    share this file.
 3. Add a row to the agent directory in `~/.claude/rules/agents.md`.
 4. Run `bash tests/guardrails.sh --strict` and `bash tests/run_all.sh` — all must pass.
@@ -251,6 +253,7 @@ bash tests/hook-e2e.test.sh
 - Record those choices as MADR ADRs (`NNNN-title-with-dashes.md`). One question per file.
 - To change course, write a new ADR that supersedes the old one; do not rewrite the old Decision Outcome.
 - The Bash authorization decision for the executor roles is ADR 0006.
+- The orchestrator's standing git authority is ADR 0007.
 
 ## Agent skills
 

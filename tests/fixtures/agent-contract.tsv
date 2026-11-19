@@ -1,6 +1,6 @@
 # name|expected_tools|model|domain_statuses(; separated)|flag
-# flag: review_only | mutator | executor
-anthory|Read, Grep, Glob, Agent|inherit|DELIVERED;BLOCKED;NEEDS_INPUT|review_only
+# flag: review_only | mutator | executor | orchestrator
+anthory|Read, Write, Edit, Bash, Grep, Glob, Agent|inherit|DELIVERED;BLOCKED;NEEDS_INPUT|orchestrator
 mark|Read, Grep, Glob|inherit|ACCURATE;NEEDS_CORRECTION;NEEDS_CLARIFICATION|review_only
 octavion|Read, Grep, Glob|inherit|PLAN_READY;BLOCKED;NEEDS_INPUT|review_only
 posca|Read, Write, Edit, Bash, Grep, Glob|inherit|PASS;PASS_WITH_RISKS;FAIL|executor

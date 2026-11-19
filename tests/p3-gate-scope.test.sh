@@ -50,7 +50,7 @@ echo "==> gate scope probes (ADR 0005)"
 
 # --- review-only fleet agents stay denied, everywhere ------------------------------
 OUTSIDE="$TMPD/unrelated-repo"; mkdir -p "$OUTSIDE"
-for a in anthory mark octavion atia; do
+for a in mark octavion atia; do
   rc_in="$(probe_rc "$a" "$LIVE_CONTRACT" "$REPO_ROOT")"
   rc_out="$(probe_rc "$a" "$LIVE_CONTRACT" "$OUTSIDE")"
   if [ "$rc_in" -eq 2 ] && [ "$rc_out" -eq 2 ] \
@@ -65,7 +65,7 @@ done
 # A command the allowlist explicitly refuses must deny with rule:allowlist, both
 # inside and outside the fleet. Exit 0 on an allowed command would be
 # indistinguishable from an external abstention.
-for a in posca vorenus pullo; do
+for a in posca vorenus pullo anthory; do
   err_in="$(probe_err "$a" "$LIVE_CONTRACT" "$REPO_ROOT" "cp x hooks/y")"
   rc_in="$(probe_rc "$a" "$LIVE_CONTRACT" "$REPO_ROOT" "cp x hooks/y")"
   rc_out="$(probe_rc "$a" "$LIVE_CONTRACT" "$OUTSIDE" "cp x hooks/y")"
@@ -75,6 +75,11 @@ for a in posca vorenus pullo; do
   else
     bad "executor: $a not governed by the allowlist (inside=$rc_in outside=$rc_out)"
   fi
+done
+for d in "$REPO_ROOT" "$OUTSIDE"; do
+  rc="$(probe_rc anthory "$LIVE_CONTRACT" "$d" "git push origin main")"
+  [ "$rc" -eq 0 ] && ok "orchestrator: git push allowed in $d" \
+                  || bad "orchestrator git push denied in $d (exit=$rc)"
 done
 
 # --- genuinely external identities are abstained on --------------------------------

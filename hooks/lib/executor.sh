@@ -97,6 +97,53 @@ exec_is_git_readonly() {
 }
 
 # ---------------------------------------------------------------------------
+# Git (orchestrator: read + write, ADR 0007)
+# ---------------------------------------------------------------------------
+
+# Subcommands that run an external program or rewrite git's own configuration:
+# `config` can set core.hooksPath/core.pager; `bisect run`, `difftool`, `mergetool`
+# and the filter family execute arbitrary commands.
+exec_git_write_sub_denied() {
+  case "${1:-}" in
+    config|help|daemon|credential|difftool|mergetool|filter-branch|filter-repo|bisect|instaweb|pager|web--browse|send-email|request-pull|shell|http-backend) return 0 ;;
+  esac
+  return 1
+}
+
+# Options that turn a write subcommand into arbitrary command execution, plus the
+# push options that rewrite or delete remote history. `--force-with-lease` is
+# deliberately NOT matched: it is the guarded form.
+exec_git_write_arg_denied() {
+  local sub="${1:-}" arg="${2:-}"
+  case "$arg" in
+    --exec|--exec=*|--upload-pack|--upload-pack=*|--receive-pack|--receive-pack=*) return 0 ;;
+    --tree-filter|--tree-filter=*|--index-filter|--index-filter=*) return 0 ;;
+  esac
+  if [[ "$sub" == "push" ]]; then
+    case "$arg" in
+      --force|-f|-f*|--mirror|--delete|--delete=*|+*) return 0 ;;
+    esac
+  fi
+  return 1
+}
+
+exec_is_git_write() {
+  local sub="${2:-}" arg
+  case "$sub" in
+    status|diff|log|show|rev-parse) ;;
+    add|commit|branch|checkout|switch|merge|rebase|stash|pull|fetch|push|tag|restore|reset|clean|rm|mv|cherry-pick|revert|remote|reflog|gc|prune|init|clone) ;;
+    *) return 1 ;;
+  esac
+  exec_git_write_sub_denied "$sub" && return 1
+  shift 2
+  for arg in "$@"; do
+    exec_git_option_denied "$arg" && return 1
+    exec_git_write_arg_denied "$sub" "$arg" && return 1
+  done
+  return 0
+}
+
+# ---------------------------------------------------------------------------
 # Test runners
 # ---------------------------------------------------------------------------
 
@@ -295,6 +342,20 @@ PY_EXEC_PATH
 # ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
+
+# exec_orchestrator_cmd_allowed <fleet_root> <argv...>
+# ADR 0007: the orchestrator keeps the executor allowlist and additionally holds
+# standing git write authority (including push/reset/clean). Non-git commands are
+# unchanged, so the executor boundary is not widened for any other role.
+exec_orchestrator_cmd_allowed() {
+  local fleet_root="${1:-}"
+  shift || return 1
+  [[ $# -ge 1 && -n "${1:-}" ]] || return 1
+  case "$1" in
+    git) exec_is_git_write "$@" ;;
+    *) exec_cmd_allowed "$fleet_root" "$@" ;;
+  esac
+}
 
 # exec_cmd_allowed <fleet_root> <argv...>
 # Unknown commands, empty argv, and anything the library cannot classify deny.
