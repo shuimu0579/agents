@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
-# restrict-bash-by-agent.sh — PreToolUse Bash gate for mutator agents.
+# restrict-bash-by-agent.sh — PreToolUse Bash gate for the 7-role fleet.
+#
+# Policy is chosen by the contract flag (column 5):
+#   review_only  → Bash denied
+#   mutator      → Bash requires the declared Bash tool; the legacy allowlist applies
+#   executor     → Bash requires the declared Bash tool AND the execution-only
+#                  allowlist in hooks/lib/executor.sh (ADR 0006)
+# Self-protection at the Bash layer is best-effort, not a sandbox: accepted residual
+# recorded in ADR 0006. The Write/Edit layer keeps absolute self-protection.
 #
 # Canonical path (git): ~/.claude/agents/hooks/restrict-bash-by-agent.sh
 # Register in the host that actually loads hooks. Claude: settings.json.
@@ -29,6 +37,12 @@ fi
 if [[ -f "${LIB_DIR}/security.sh" ]]; then
   source "${LIB_DIR}/security.sh"
 fi
+# Execution-only allowlist for the three executor roles (ADR 0006). Sourced
+# optionally, deliberately NOT fail-closed here: a missing library must not lock
+# the main session. The executor branch below denies when the function is absent.
+if [[ -f "${LIB_DIR}/executor.sh" ]]; then
+  source "${LIB_DIR}/executor.sh"
+fi
 if ! declare -F hook_deny_pre >/dev/null 2>&1 || ! declare -F sec_url_extract_host >/dev/null 2>&1; then
   echo "[bash-hook] BLOCKED: required hook libraries missing (rule:lib)." >&2
   exit 2
@@ -46,6 +60,7 @@ HOOK_AUDIT_LOG="${HOOK_AUDIT_LOG:-${TMPDIR:-/tmp}/claude-agent-bash-gate.audit.l
 cmd=""
 agent=""
 session_id=""
+EXECUTOR=0
 
 observe_attribution() {
   hook_observe_attribution "$agent"
@@ -162,6 +177,9 @@ case "$agent_policy" in
     block "[bash-hook] BLOCKED: agent_type=$agent must not use Bash (rule:review-only)." "review-only"
     ;;
   mutator) ;;
+  # Executor roles (ADR 0006): write + run. The allowlist is applied after the
+  # global deny rules; it never grants a generic shell.
+  executor) EXECUTOR=1 ;;
   "")
     # Absent from the contract. That is either an agent this fleet does not govern, or
     # a contract that has lost a row — and the two must not be confused (ADR 0005).
@@ -253,6 +271,23 @@ option_value() {
 }
 
 allowed=0
+# Executor policy (ADR 0006). Placed immediately after allowed=0 and before the
+# legacy e2e-runner branch; nothing below may reset an allowed executor decision.
+# The main session exited above, and a review-only agent was blocked above, so
+# only an agent whose contract flag is `executor` can reach this block.
+if [[ "$EXECUTOR" -eq 1 ]]; then
+  declare -F exec_cmd_allowed >/dev/null 2>&1 ||
+    block "[bash-hook] BLOCKED: executor policy library missing (rule:lib)." "lib"
+  exec_cmd_allowed "$FLEET_ROOT_FOR_APPROVAL" "${SEC_ARGV[@]}" ||
+    block "[bash-hook] BLOCKED: command not on executor allowlist for $agent (rule:allowlist)." "allowlist"
+  allowed=1
+fi
+
+# Legacy e2e-runner allowlist (retained for the parser/approval coverage pinned by
+# tests/hooks.test.sh, tests/hook-e2e.test.sh, tests/p1-bypass.test.sh and
+# tests/p3-approval-binding.test.sh). The live contract has no e2e-runner row; those
+# suites synthesize one, so this branch is reachable only under a test contract.
+# The fleet no longer defines an e2e-runner identity.
 case "$agent" in
   e2e-runner)
     launcher="${SEC_ARGV[0]}"
