@@ -12,6 +12,7 @@
 #   2. Review-only tool contract (flag `review_only`: no Write/Edit/Bash).
 #   3. Mutator contract (flag `mutator`: carries Write or Edit).
 #   3b. Executor contract (flag `executor`: carries Write/Edit and Bash — ADR 0006).
+#   3c. Orchestrator contract (flag `orchestrator`: carries Write/Edit and Bash — ADR 0007).
 #   4. Verdict token present (each agent's orchestrator-facing output token still exists).
 #   5. Line budget (<400 ok, 400-800 warn, >800 fail — per rules/coding-style.md).
 #   6. NF1: archive/ must contain no *.md (Claude Code scans recursively — a .md there is a live agent).

@@ -194,6 +194,8 @@ bt_rule "anthory git config denied" "anthory" "git config core.pager cat" 2 "rul
 bt_rule "anthory git -C denied" "anthory" "git -C /tmp status" 2 "rule:allowlist"
 bt_rule "anthory rm still denied" "anthory" "rm -rf /tmp/x" 2 "rule:deny-destructive"
 bt_rule "anthory cp still denied" "anthory" "cp x hooks/y" 2 "rule:allowlist"
+bt "anthory git checkout -b allow" "anthory" "git checkout -b feat/x" 0
+bt_rule "anthory git switch -c denied (use checkout -b)" "anthory" "git switch -c feat/x" 2 "rule:allowlist"
 
 # --- Bash authority is derived from the declared tool set (ADR 0002) ---
 # A mutator flag does not grant Bash by itself: a synthetic mutator whose tool set
