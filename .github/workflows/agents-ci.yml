@@ -13,10 +13,6 @@ permissions:
 jobs:
   hook-suites:
     # Runs the enforcement-layer suites, not just frontmatter validation.
-    # Staged rollout: the suites were developed and are verified on macOS bash 3.2.
-    # Remove `continue-on-error` once a run on ubuntu-latest is green — until then a
-    # red result here is information, not a gate.
-    continue-on-error: true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
