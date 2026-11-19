@@ -137,7 +137,13 @@ PY
   fi
 
   local nlink size
-  nlink=$(stat -f '%l' "$p" 2>/dev/null || stat -c '%h' "$p" 2>/dev/null || printf 'unknown')
+  # GNU first, BSD second. `stat -f` means FORMAT on BSD but FILESYSTEM on GNU, and the
+  # GNU invocation still writes a filesystem dump to stdout before failing — the `||`
+  # fallback then appended the real count to that dump and the numeric check below
+  # rejected the mixed output (rule 17). Order matters more than the format letter.
+  if ! nlink=$(stat -c '%h' -- "$p" 2>/dev/null); then
+    nlink=$(stat -f '%l' -- "$p" 2>/dev/null) || nlink=unknown
+  fi
   [[ "$nlink" =~ ^[0-9]+$ ]] || return 17
   [ "$nlink" -eq 1 ] || { rm -f -- "$p" 2>/dev/null || true; return 18; }
 

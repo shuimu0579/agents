@@ -25,6 +25,15 @@ jobs:
       - name: Check hook dependencies
         run: command -v jq python3 bash
 
+      # The hooks are registered as ~/.claude/agents/hooks/... because that is where
+      # Claude Code installs this fleet. A CI checkout lives somewhere else, so the
+      # registration tests would resolve a path that does not exist. Mirror the
+      # checkout into the installed layout instead of weakening the assertions.
+      - name: Mirror checkout into the installed layout
+        run: |
+          mkdir -p "$HOME/.claude"
+          ln -sfn "$GITHUB_WORKSPACE" "$HOME/.claude/agents"
+
       - name: Run enforcement suites
         run: bash tests/run_all.sh
 
