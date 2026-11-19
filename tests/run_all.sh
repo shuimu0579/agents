@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# run_all.sh — Unified Test Runner for Claude Code Agent Fleet
+# Runs every suite registered below with run_suite and fails if any suite fails.
+# Only Guardrails is invoked in strict mode (--strict).
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
+
+echo "================================================================================"
+echo "          CLAUDE CODE AGENT FLEET — UNIFIED TEST SUITE RUNNER"
+echo "================================================================================"
+echo "Working directory: $REPO_ROOT"
+echo
+
+TOTAL_SUITES=0
+PASSED_SUITES=0
+FAILED_SUITES=0
+
+# Takes the command as separate arguments and runs it directly. `eval` on a single
+# string was never needed here — every call site passes a fixed command — and it made
+# a suite name or path containing a space or quote a shell-injection surface.
+run_suite() {
+  local name="$1"
+  shift
+  TOTAL_SUITES=$((TOTAL_SUITES + 1))
+  echo ">>> [SUITE $TOTAL_SUITES] $name"
+  if "$@"; then
+    PASSED_SUITES=$((PASSED_SUITES + 1))
+    echo ">>> [PASS] $name"
+  else
+    FAILED_SUITES=$((FAILED_SUITES + 1))
+    echo ">>> [FAIL] $name" >&2
+  fi
+  echo "--------------------------------------------------------------------------------"
+}
+
+cd "$REPO_ROOT"
+
+export HOOK_SRC="${HOOK_SRC:-$REPO_ROOT/hooks/restrict-bash-by-agent.sh}"
+export HOOK_PATH="${HOOK_PATH:-$HOOK_SRC}"
+export WRITE_HOOK_SRC="${WRITE_HOOK_SRC:-$REPO_ROOT/hooks/restrict-mutator-write.sh}"
+export WRITE_HOOK_PATH="${WRITE_HOOK_PATH:-$WRITE_HOOK_SRC}"
+export RESTRICT_HOOK_SRC="${RESTRICT_HOOK_SRC:-$REPO_ROOT/hooks/xixi/restrict-write.sh}"
+export COPY_HOOK_SRC="${COPY_HOOK_SRC:-$REPO_ROOT/hooks/xixi/copy-on-write.sh}"
+export COMMON_SRC="${COMMON_SRC:-$REPO_ROOT/hooks/xixi/common.sh}"
+export AGENT_CONTRACT_FILE="${AGENT_CONTRACT_FILE:-$REPO_ROOT/tests/fixtures/agent-contract.tsv}"
+if [[ -z "${SETTINGS:-}" ]]; then
+  if [[ -f "${HOME}/.claude/settings.json" ]]; then
+    export SETTINGS="${HOME}/.claude/settings.json"
+  else
+    export SETTINGS="$REPO_ROOT/tests/fixtures/settings.json"
+  fi
+fi
+
+run_suite "Guardrails (Strict Mode)" bash tests/guardrails.sh --strict
+run_suite "Bash Mutator Gate Tests (hooks.test.sh)" bash tests/hooks.test.sh
+run_suite "Xixi Write Sandbox & Clipboard Tests (xixi-hooks.test.sh)" bash tests/xixi-hooks.test.sh
+run_suite "Hook Registration & E2E Tests (hook-e2e.test.sh)" bash tests/hook-e2e.test.sh
+run_suite "P1 Bypass Probes (p1-bypass.test.sh)" bash tests/p1-bypass.test.sh
+run_suite "P3 Lib Hardening Probes (p3-lib-hardening.test.sh)" bash tests/p3-lib-hardening.test.sh
+run_suite "P3 Contract-Gate Meta Probes (p3-guardrails-quality.test.sh)" bash tests/p3-guardrails-quality.test.sh
+run_suite "P3 Approval Binding Probes (p3-approval-binding.test.sh)" bash tests/p3-approval-binding.test.sh
+run_suite "Gate Scope Probes (p3-gate-scope.test.sh)" bash tests/p3-gate-scope.test.sh
+
+echo
+echo "================================================================================"
+echo "TEST SUITE SUMMARY: $PASSED_SUITES/$TOTAL_SUITES passed, $FAILED_SUITES failed"
+echo "================================================================================"
+
+if [[ "$FAILED_SUITES" -eq 0 ]]; then
+  echo "✅ ALL TEST SUITES PASSED SUCCESSFULLY."
+  exit 0
+else
+  echo "❌ TEST SUITE FAILURES DETECTED." >&2
+  exit 1
+fi
