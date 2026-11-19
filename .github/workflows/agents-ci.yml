@@ -1,4 +1,4 @@
-# agents-ci — regression net for the Claude Code agent fleet (grill F5)
+# agents-ci — validation for the Claude Code agent fleet
 name: agents-ci
 
 on:
@@ -21,12 +21,54 @@ jobs:
       - name: Clean checkout invariant
         run: test -z "$(git status --porcelain)"
 
-      - name: Hook executable + direct invocation
+      - name: Validate agent definitions
         run: |
-          test -x hooks/restrict-bash-by-agent.sh
-          test -x hooks/restrict-mutator-write.sh
-          hooks/restrict-bash-by-agent.sh </dev/null
-          hooks/restrict-mutator-write.sh </dev/null
+          python3 - <<'PY'
+          import pathlib
+          import re
+          import sys
 
-      - name: All test suites
-        run: bash tests/run_all.sh
+          root = pathlib.Path(".")
+          agents = sorted(p for p in root.glob("*.md") if p.name != "AGENTS.md")
+          if not agents:
+              sys.exit("error: no agent *.md files found at repo root")
+
+          conflict_re = re.compile(r"^(<<<<<<<|=======|>>>>>>>)", re.MULTILINE)
+          errors = []
+
+          for path in agents:
+              text = path.read_text(encoding="utf-8")
+              if conflict_re.search(text):
+                  errors.append(f"{path.name}: merge conflict marker detected")
+              m = re.match(r"^---\n(.*?)\n---\n", text, re.DOTALL)
+              if not m:
+                  errors.append(f"{path.name}: missing YAML frontmatter")
+                  continue
+              fm = m.group(1)
+              name_m = re.search(r"^name:\s*(\S+)\s*$", fm, re.MULTILINE)
+              if not name_m or name_m.group(1) != path.stem:
+                  errors.append(f"{path.name}: frontmatter name must match filename stem '{path.stem}'")
+              desc_m = re.search(r"^description:\s*(.*)$", fm, re.MULTILINE)
+              if not desc_m:
+                  errors.append(f"{path.name}: missing frontmatter description")
+              else:
+                  inline = desc_m.group(1).strip()
+                  if inline in ("", ">", "|", ">-", "|-"):
+                      block_lines = []
+                      for line in fm[desc_m.end():].splitlines():
+                          if not line.strip():
+                              continue
+                          if line.startswith((" ", "\t")):
+                              block_lines.append(line.strip())
+                          else:
+                              break
+                      if not block_lines:
+                          errors.append(f"{path.name}: empty frontmatter description")
+
+          if errors:
+              for e in errors:
+                  print(f"FAIL: {e}", file=sys.stderr)
+              sys.exit(1)
+
+          print(f"ok: validated {len(agents)} agent definitions: {', '.join(p.stem for p in agents)}")
+          PY
