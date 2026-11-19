@@ -6,8 +6,8 @@
 # .md (e.g. ADR 0002 removing Bash from e2e-runner) silently does not reach Codex.
 #
 # Usage:
-#   bash scripts/sync-codex-mirror.sh          # regenerate stale mirrors
-#   bash scripts/sync-codex-mirror.sh --check  # exit 1 if any mirror is stale (CI/guardrails)
+#   bash scripts/sync-codex-mirror.sh          # regenerate stale mirrors, prune orphans
+#   bash scripts/sync-codex-mirror.sh --check  # exit 1 if any mirror is stale OR orphaned
 set -uo pipefail
 
 FLEET_ROOT="$(cd "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -41,11 +41,20 @@ if not m:
     sys.exit(f"{src}: no YAML frontmatter")
 fm, body = m.group(1), m.group(2).lstrip("\n")
 
-dm = re.search(r"^description:\s*\|\s*\n(.*?)(?=^\w+:|\Z)", fm, re.S | re.M)
+# YAML block scalars come in two styles and both appear in this fleet:
+#   description: |   literal  — newlines preserved
+#   description: >   folded   — newlines become spaces, blank line = paragraph break
+# Matching only `|` left every folded description rendered as the literal marker.
+dm = re.search(r"^description:\s*([|>])([-+]?)\s*\n((?:[ \t].*\n|\n)*)", fm, re.M)
 if dm:
-    raw = dm.group(1)
+    style, raw = dm.group(1), dm.group(3)
     indent = min((len(l) - len(l.lstrip()) for l in raw.splitlines() if l.strip()), default=0)
-    desc = "\n".join(l[indent:] if len(l) >= indent else l for l in raw.splitlines()).strip()
+    lines = [l[indent:] if len(l) >= indent else l for l in raw.splitlines()]
+    if style == ">":
+        blocks = re.split(r"\n\s*\n", "\n".join(lines))
+        desc = "\n\n".join(b.replace("\n", " ") for b in blocks if b.strip()).strip()
+    else:
+        desc = "\n".join(lines).strip()
 else:
     dm = re.search(r"^description:\s*(.+)$", fm, re.M)
     desc = dm.group(1).strip() if dm else ""
@@ -114,13 +123,31 @@ while IFS='|' read -r name _tools _model _statuses _flag; do
   written=$((written + 1))
 done < "$CONTRACT"
 
+# A mirror with no contract row is a retired agent that Codex would still dispatch.
+# Pruning it is part of keeping the two runtimes in agreement, not a separate cleanup.
+orphans=0
+for f in "$MIRROR_DIR"/*.toml; do
+  [[ -e "$f" ]] || continue
+  base="$(basename "$f" .toml)"
+  if awk -F'|' -v n="$base" '/^[[:space:]]*(#|$)/ {next} NF==5 && $1 == n {found=1} END {exit(found ? 0 : 1)}' "$CONTRACT"; then
+    continue
+  fi
+  orphans=$((orphans + 1))
+  if [[ "$CHECK_ONLY" -eq 1 ]]; then
+    echo "ORPHAN $base  ($f has no contract row)"
+  else
+    rm -f "$f"
+    echo "pruned $base"
+  fi
+done
+
 if [[ "$CHECK_ONLY" -eq 1 ]]; then
-  if [[ "$stale" -gt 0 ]]; then
-    echo "sync-codex-mirror: $stale mirror(s) stale — run: bash scripts/sync-codex-mirror.sh" >&2
+  if [[ "$stale" -gt 0 || "$orphans" -gt 0 ]]; then
+    echo "sync-codex-mirror: $stale stale, $orphans orphaned — run: bash scripts/sync-codex-mirror.sh" >&2
     exit 1
   fi
   echo "sync-codex-mirror: all mirrors current"
   exit 0
 fi
 
-echo "sync-codex-mirror: $written regenerated"
+echo "sync-codex-mirror: $written regenerated, $orphans pruned"
