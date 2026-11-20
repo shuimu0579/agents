@@ -111,11 +111,11 @@ arrow order above.
 
 ## Mutator mutex
 
-- Repo mutator (primary): `vorenus` (Read, Write, Edit, Bash, Grep, Glob). Only one repo mutator instance runs at a time.
-- Repo mutator (fallback): `pullo` (Read, Write, Edit, Bash, Grep, Glob) — only when `vorenus` is explicitly out of quota. Never take over on an ordinary timeout or error.
-- Ledger writer: `posca` (Read, Write, Edit, Bash, Grep, Glob) writes audit records only, not implementation.
-- Review roles (no Write/Edit; Bash only for `tools/agent-cli.sh`, may run in parallel): `mark` (Read, Grep, Glob, Bash), `octavion` (Read, Grep, Glob, Bash), `atia` (Read, Grep, Glob, Bash).
-- Orchestrator: `anthory` (Read, Write, Edit, Bash, Grep, Glob, Agent) — executor allowlist plus standing git write authority including `push`/`reset --hard`/`clean` (ADR 0007). Not a repo mutator: implementation still goes to `vorenus`/`pullo`.
+- Repo mutator (primary): `vorenus` (Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch). Only one repo mutator instance runs at a time.
+- Repo mutator (fallback): `pullo` (Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch) — only when `vorenus` is explicitly out of quota. Never take over on an ordinary timeout or error.
+- Ledger writer: `posca` (Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch) writes audit records only, not implementation.
+- Review roles (no Write/Edit; Bash only for `tools/agent-cli.sh`, may run in parallel): `mark` (Read, Grep, Glob, Bash, WebSearch, WebFetch), `octavion` (Read, Grep, Glob, Bash, WebSearch, WebFetch), `atia` (Read, Grep, Glob, Bash, WebSearch, WebFetch).
+- Orchestrator: `anthory` (Read, Write, Edit, Bash, Grep, Glob, Agent, WebSearch, WebFetch) — executor allowlist plus standing git write authority including `push`/`reset --hard`/`clean` (ADR 0007). Not a repo mutator: implementation still goes to `vorenus`/`pullo`.
 
 Every tool list above restates column 2 of `tests/fixtures/agent-contract.tsv`;
 that column is authoritative if the two ever disagree.

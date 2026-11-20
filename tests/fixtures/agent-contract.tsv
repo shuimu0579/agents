@@ -1,9 +1,9 @@
 # name|expected_tools|model|domain_statuses(; separated)|flag
 # flag: review_only | review_cli | mutator | executor | orchestrator
-anthory|Read, Write, Edit, Bash, Grep, Glob, Agent|inherit|DELIVERED;BLOCKED;NEEDS_INPUT|orchestrator
-mark|Read, Grep, Glob, Bash|inherit|ACCURATE;NEEDS_CORRECTION;NEEDS_CLARIFICATION|review_cli
-octavion|Read, Grep, Glob, Bash|inherit|PLAN_READY;BLOCKED;NEEDS_INPUT|review_cli
-posca|Read, Write, Edit, Bash, Grep, Glob|inherit|PASS;PASS_WITH_RISKS;FAIL|executor
-atia|Read, Grep, Glob, Bash|inherit|ON_TRACK;DEVIATED;BLOCKED;INSUFFICIENT_EVIDENCE|review_cli
-vorenus|Read, Write, Edit, Bash, Grep, Glob|inherit|PASS;FAIL;BLOCKED_QUOTA|executor
-pullo|Read, Write, Edit, Bash, Grep, Glob|inherit|PASS;FAIL;BLOCKED|executor
+anthory|Read, Write, Edit, Bash, Grep, Glob, Agent, WebSearch, WebFetch|inherit|DELIVERED;BLOCKED;NEEDS_INPUT|orchestrator
+mark|Read, Grep, Glob, Bash, WebSearch, WebFetch|inherit|ACCURATE;NEEDS_CORRECTION;NEEDS_CLARIFICATION|review_cli
+octavion|Read, Grep, Glob, Bash, WebSearch, WebFetch|inherit|PLAN_READY;BLOCKED;NEEDS_INPUT|review_cli
+posca|Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch|inherit|PASS;PASS_WITH_RISKS;FAIL|executor
+atia|Read, Grep, Glob, Bash, WebSearch, WebFetch|inherit|ON_TRACK;DEVIATED;BLOCKED;INSUFFICIENT_EVIDENCE|review_cli
+vorenus|Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch|inherit|PASS;FAIL;BLOCKED_QUOTA|executor
+pullo|Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch|inherit|PASS;FAIL;BLOCKED|executor

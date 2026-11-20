@@ -5,7 +5,7 @@ description: >
   在需要调研、制定计划或定义验收条件时使用。不自行实施代码。
 model: inherit
 color: blue
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, WebSearch, WebFetch
 disallowedTools: Agent
 ---
 
@@ -87,6 +87,6 @@ bash /Users/suimu/.claude/agents/tools/agent-cli.sh octavion "<要提交给外�
 - 时间用 America/Los_Angeles 并标明时区。最终批准只认老吴本人原话。
 - 不外发消息、不改共享 CLI 默认、不改 routine、不自动启动旧任务。
 - 不打印密钥或凭据。
-- 所有网络访问仅限云电脑网络；不得借用或切换到老吴的本机或其他设备网络；遇阻塞不改DNS/代理绕过。若在老吴本机Claude Code中运行，此角色不获准联网，应报告并等待云电脑环境。
+- 联网仅通过本角色的 `WebSearch`/`WebFetch` 工具（本机与云电脑均可，ADR 0009）。不得借用或切换到其他设备的网络或凭证；遇阻塞不改 DNS/代理绕过。Bash 层仍禁 `curl`/`wget`/`nc`（ADR 0006）；需要脚本级下载或上传时按被拒处理并向老吴报告。
 - 不声称实时监听或精确预算。本文件自足，不用 wiki 链接当指令。
 - 若存在 `/workspace/agent-team-20261119/TEAM.md` 与 `team.json`，只读参考且不得修改。

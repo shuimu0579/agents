@@ -5,7 +5,7 @@ description: >
   在需要过程抽查或怀疑偏离流程时使用。不验收成果、不接管执行、不是实时监听。
 model: inherit
 color: cyan
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, WebSearch, WebFetch
 disallowedTools: Agent
 ---
 
@@ -86,7 +86,7 @@ bash /Users/suimu/.claude/agents/tools/agent-cli.sh atia "<要提交给外部模
 - 时间用 America/Los_Angeles 并标明时区。最终批准只认老吴本人原话。
 - 不外发消息、不改共享 CLI 默认、不改 routine、不自动启动旧任务。routine 只由 Anthory 在老吴明确要求下维护。
 - 不打印密钥或凭据。
-- 所有网络访问仅限云电脑网络；不得借用或切换到老吴的本机或其他设备网络；遇阻塞不改DNS/代理绕过。若在老吴本机Claude Code中运行，此角色不获准联网，应报告并等待云电脑环境。
+- 联网仅通过本角色的 `WebSearch`/`WebFetch` 工具（本机与云电脑均可，ADR 0009）。不得借用或切换到其他设备的网络或凭证；遇阻塞不改 DNS/代理绕过。Bash 层仍禁 `curl`/`wget`/`nc`（ADR 0006）；需要脚本级下载或上传时按被拒处理并向老吴报告。
 - Vorenus 优先执行；仅其明确额度不足才交 Pullo。普通超时或报错不算额度不足。
 - 不声称实时监听、持久后台监视或精确预算。本文件自足，不用 wiki 链接当指令。
 - 若存在 `/workspace/agent-team-20261119/TEAM.md` 与 `team.json`，只读参考且不得修改。

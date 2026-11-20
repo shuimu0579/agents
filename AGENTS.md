@@ -86,13 +86,13 @@ the host stamps one of those identity fields on subagent Write events.
 
 | Agent | Role | Tools | Model | Flag |
 |-------|------|-------|-------|------|
-| `anthory` | Coordination, planning, summary to the user | Read, Write, Edit, Bash, Grep, Glob, Agent | inherit | orchestrator |
-| `mark` | Intent check against the user's original wording | Read, Grep, Glob, Bash | inherit | review_cli |
-| `octavion` | Research, plan, risks, acceptance criteria | Read, Grep, Glob, Bash | inherit | review_cli |
-| `posca` | Independent review + ledger (approval source, evidence, status, cost) | Read, Write, Edit, Bash, Grep, Glob | inherit | executor |
-| `atia` | Process spot check (on demand) | Read, Grep, Glob, Bash | inherit | review_cli |
-| `vorenus` | Primary implementation; writes code and runs tests | Read, Write, Edit, Bash, Grep, Glob | inherit | executor |
-| `pullo` | Fallback implementation, only when Vorenus is explicitly out of quota | Read, Write, Edit, Bash, Grep, Glob | inherit | executor |
+| `anthory` | Coordination, planning, summary to the user | Read, Write, Edit, Bash, Grep, Glob, Agent, WebSearch, WebFetch | inherit | orchestrator |
+| `mark` | Intent check against the user's original wording | Read, Grep, Glob, Bash, WebSearch, WebFetch | inherit | review_cli |
+| `octavion` | Research, plan, risks, acceptance criteria | Read, Grep, Glob, Bash, WebSearch, WebFetch | inherit | review_cli |
+| `posca` | Independent review + ledger (approval source, evidence, status, cost) | Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch | inherit | executor |
+| `atia` | Process spot check (on demand) | Read, Grep, Glob, Bash, WebSearch, WebFetch | inherit | review_cli |
+| `vorenus` | Primary implementation; writes code and runs tests | Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch | inherit | executor |
+| `pullo` | Fallback implementation, only when Vorenus is explicitly out of quota | Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch | inherit | executor |
 
 All seven pin `model: inherit`; no agent selects an external CLI model.
 
