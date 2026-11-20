@@ -3,6 +3,8 @@
 #
 # Policy is chosen by the contract flag (column 5):
 #   review_only  → Bash denied
+#   review_cli   → Bash limited to the pinned external-CLI wrapper
+#                  (bash tools/agent-cli.sh <role>, ADR 0008); no other command
 #   mutator      → Bash requires the declared Bash tool; the legacy allowlist applies
 #   executor     → Bash requires the declared Bash tool AND the execution-only
 #                  allowlist in hooks/lib/executor.sh (ADR 0006)
@@ -64,6 +66,7 @@ agent=""
 session_id=""
 EXECUTOR=0
 ORCHESTRATOR=0
+REVIEW_CLI=0
 
 observe_attribution() {
   hook_observe_attribution "$agent"
@@ -179,6 +182,10 @@ case "$agent_policy" in
   review_only)
     block "[bash-hook] BLOCKED: agent_type=$agent must not use Bash (rule:review-only)." "review-only"
     ;;
+  # Review roles that delegate to an external CLI (ADR 0008). They are still not
+  # writers and get no general shell: the only admitted command is the pinned
+  # wrapper, which owns the CLI, model and read-only flags.
+  review_cli) REVIEW_CLI=1 ;;
   mutator) ;;
   # Executor roles (ADR 0006): write + run. The allowlist is applied after the
   # global deny rules; it never grants a generic shell.
@@ -223,11 +230,53 @@ if ! printf '%s' "$agent_tools" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:spac
   block "[bash-hook] BLOCKED: agent_type=$agent does not declare the Bash tool (rule:no-bash-tool)." "no-bash-tool"
 fi
 
+# Audit B6: tokenization walks the command character by character in Bash 3.2.
+# Measured on this fleet: 8 KiB ~2.7s, 32 KiB ~37s, against a 5s hook timeout.
+# Cap before any parsing so an oversized command fails predictably instead of
+# stalling the gate.
+MAX_COMMAND_BYTES=16384
+if [[ "${#cmd}" -gt "$MAX_COMMAND_BYTES" ]]; then
+  block "[bash-hook] BLOCKED: command exceeds ${MAX_COMMAND_BYTES} bytes (rule:command-too-long)." "command-too-long"
+fi
+
+# --- Review roles with a pinned CLI route (ADR 0008) ---
+# Exactly one admitted shape: bash <fleet>/tools/agent-cli.sh <role> [words...].
+# The role selector must match the attributed caller. These roles still hold no
+# general shell; the wrapper fixes CLI, model and the read-only flags, and
+# refuses options of its own.
+if [[ "$REVIEW_CLI" -eq 1 ]]; then
+  declare -F exec_is_agent_cli >/dev/null 2>&1 ||
+    block "[bash-hook] BLOCKED: CLI dispatcher policy library missing (rule:lib)." "lib"
+  if ! sec_cmd_tokenize "$cmd"; then
+    block "[bash-hook] BLOCKED: empty, ambiguous, or unsupported shell command (rule:no-shell-meta)." "no-shell-meta"
+  fi
+  case "${SEC_ARGV[0]:-}" in
+    bash) ;;
+    *) block "[bash-hook] BLOCKED: review role $agent may only run tools/agent-cli.sh via bash (rule:allowlist)." "allowlist" ;;
+  esac
+  if [[ ${#SEC_ARGV[@]} -lt 4 ]] ||
+     ! exec_is_agent_cli "$FLEET_ROOT_FOR_APPROVAL" "${SEC_ARGV[1]}" "${SEC_ARGV[2]}" "$agent" "${SEC_ARGV[@]:3}"; then
+    block "[bash-hook] BLOCKED: review role $agent may only run tools/agent-cli.sh $agent <prompt> (rule:allowlist)." "allowlist"
+  fi
+  audit_decision "cli-dispatch" "allow"
+  exit 0
+fi
+
 # --- Mutators only below ---
 
 # Tokenize once. Every command policy below consumes SEC_ARGV, not cmd.
 if ! sec_cmd_tokenize "$cmd"; then
   block "[bash-hook] BLOCKED: empty, ambiguous, or unsupported shell command (rule:no-shell-meta)." "no-shell-meta"
+fi
+# Executor roles invoking their own bound external-CLI wrapper route use the
+# same wrapper validation rule as review_cli, before sec_cmd_is_network_or_escape
+# scans prompt text for words like `curl` (audit #11).
+if [[ "$EXECUTOR" -eq 1 || "$ORCHESTRATOR" -eq 1 ]] &&
+   [[ "${SEC_ARGV[0]:-}" == "bash" && ${#SEC_ARGV[@]} -ge 4 ]] &&
+   declare -F exec_is_agent_cli >/dev/null 2>&1 &&
+   exec_is_agent_cli "$FLEET_ROOT_FOR_APPROVAL" "${SEC_ARGV[1]}" "${SEC_ARGV[2]}" "$agent" "${SEC_ARGV[@]:3}"; then
+  audit_decision "allowlist" "allow"
+  exit 0
 fi
 if sec_cmd_is_destructive "${SEC_ARGV[@]}"; then
   # ADR 0007: the orchestrator holds standing authorization for git push/reset/clean;

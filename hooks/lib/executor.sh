@@ -11,6 +11,10 @@
 # fleet also consumes.
 #
 # Bash 3.2 (macOS) compatible. No `set -e`.
+
+# Python helpers live beside this file (ADR 0008 / audit B7): a script file avoids
+# Bash 3.2 here-documents, which need writable temporary storage.
+EXEC_PY_DIR="${EXEC_PY_DIR:-$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/py}"
 #
 # exec_cmd_allowed <fleet_root> <argv...>  -> 0 allow, non-zero deny.
 # Errors are reported by the caller (rule:allowlist); this library only returns status.
@@ -314,31 +318,81 @@ exec_is_script_path() {
   [[ -n "$fleet_root" && -n "$path" ]] || return 1
   [[ "$path" != -* ]] || return 1
   exec_has_parent_segment "$path" && return 1
-  command -v python3 >/dev/null 2>&1 || return 1
-  python3 - "$fleet_root" "$path" <<'PY_EXEC_PATH'
-import os
-import sys
+  [[ -n "${EXEC_PY_DIR:-}" && -f "$EXEC_PY_DIR/exec_script_path.py" ]] || return 1
+  python3 -I "$EXEC_PY_DIR/exec_script_path.py" "$fleet_root" "$path"
+}
+# ---------------------------------------------------------------------------
+# External CLI dispatcher: bash <fleet>/tools/agent-cli.sh <role> <prompt...>
+# ---------------------------------------------------------------------------
 
-root = os.path.realpath(sys.argv[1])
-real = os.path.realpath(sys.argv[2])
-if not os.path.isfile(real):
-    sys.exit(1)
-if sys.platform == "darwin":
-    root = root.casefold()
-    real = real.casefold()
-tests = os.path.join(root, "tests") + os.sep
-hooks = os.path.join(root, "hooks") + os.sep
-scripts = os.path.join(root, "scripts") + os.sep
-ok = (
-    real.startswith(tests)
-    and not real.startswith(hooks)
-    and not real.startswith(scripts)
-    and real.endswith(".sh")
-)
-sys.exit(0 if ok else 1)
-PY_EXEC_PATH
+# ADR 0008. The external CLIs (agy, codex, grok) are agentic: they can write files
+# and run commands. Admitting them by name would be an arbitrary-execution grant,
+# so the gate admits only the pinned wrapper, and the wrapper owns model and
+# safety flags.
+#
+# Single source of truth for caller-to-route policy (audit #13): consumed by both
+# the PreToolUse Bash gate and tools/agent-cli.sh.
+exec_agent_cli_route() {
+  case "${1:-}" in
+    mark)     printf 'agy|gemini-4-hydrogen-xhigh\n' ;;
+    posca)    printf 'agy|gemini-4-argon-high\n' ;;
+    vorenus)  printf 'agy|gemini-pro-orchestrator-neon\n' ;;
+    octavion) printf 'codex|gpt-6.2-sol\n' ;;
+    atia)     printf 'grok|grok-4.7\n' ;;
+    *)        return 1 ;;
+  esac
 }
 
+exec_agent_cli_roles() {
+  printf 'mark octavion posca atia vorenus'
+}
+
+exec_agent_cli_role_allowed() {
+  exec_agent_cli_route "${1:-}" >/dev/null
+}
+
+# Validate the prompt payload (after argv or stdin assembly) so a prompt cannot
+# select CLI options, headless slash commands, or backend subcommands (audit #8, #9).
+# ADR 0008 / audit B8: every backend receives the prompt through an explicit data
+# channel (agy --print=, codex stdin `-`, grok -p value), so a prompt can no longer
+# be read as a subcommand. An earlier first-word denylist rejected ordinary review
+# prompts such as "Review the patch" and was removed.
+exec_agent_cli_prompt_valid() {
+  local prompt="${1:-}" trimmed
+  [[ -n "${prompt//[[:space:]]/}" ]] || return 1
+  trimmed="${prompt#"${prompt%%[![:space:]]*}"}"
+  [[ -n "$trimmed" ]] || return 1
+  case "$trimmed" in
+    -*|/*) return 1 ;;
+  esac
+  return 0
+}
+
+exec_is_agent_cli() {
+  local fleet_root="${1:-}" path="${2:-}" role="${3:-}" caller="${4:-${agent:-}}"
+  [[ $# -ge 5 ]] || return 1
+  [[ -n "$fleet_root" && -n "$path" && -n "$role" && -n "$caller" ]] || return 1
+  # Audit B4/B13: classify the exact wrapper path first, and require an absolute
+  # spelling. A relative path resolves against the hook process's working
+  # directory, not the event's execution directory, so it is refused outright.
+  case "$path" in
+    /*/tools/agent-cli.sh) ;;
+    *) return 1 ;;
+  esac
+  exec_has_parent_segment "$path" && return 1
+  [[ "$role" == "$caller" ]] || return 1
+  exec_agent_cli_role_allowed "$role" || return 1
+  shift 4
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      -*) return 1 ;;
+    esac
+  done
+  exec_agent_cli_prompt_valid "$*" || return 1
+  [[ -n "${EXEC_PY_DIR:-}" && -f "$EXEC_PY_DIR/exec_cli_path.py" ]] || return 1
+  python3 -I "$EXEC_PY_DIR/exec_cli_path.py" "$fleet_root" "$path"
+}
 # ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
@@ -376,7 +430,16 @@ exec_cmd_allowed() {
     python3)
       exec_py_module_allowed "$@"
       ;;
-    bash|sh)
+    bash)
+      # The pinned external-CLI wrapper (ADR 0008) is the only executable this
+      # family admits outside tests/, and only via bash: the role is bound to the
+      # attributed caller, and the wrapper refuses options/subcommands.
+      if [[ $# -ge 4 ]] && exec_is_agent_cli "$fleet_root" "${2:-}" "${3:-}" "${agent:-}" "${@:4}"; then
+        return 0
+      fi
+      exec_is_script_path "$fleet_root" "${2:-}"
+      ;;
+    sh)
       exec_is_script_path "$fleet_root" "${2:-}"
       ;;
     *)

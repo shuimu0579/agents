@@ -235,6 +235,15 @@ casefold() {
 _FLEET_ROOT_CF="$(casefold "$FLEET_ROOT")"
 
 # Darwin APFS is case-insensitive; string compare after realpath is not enough.
+# realpath also does not collapse an APFS firmlink. /System/Volumes/Data/Users/...
+# is a second spelling of /Users/... with the same (st_dev, st_ino). Protection is
+# therefore decided by filesystem identity: the longest existing ancestor of the
+# target (the target itself when it exists) is walked upward, and any ancestor
+# whose identity equals a protected root is protected. A hard link is the same
+# identity as the file inside the protected tree, so those file identities are
+# collected too. Lexical prefix stays for a child that does not exist yet, and
+# for the approvals glob, which is not limited to this fleet's tree. /tmp is not
+# a protected root; product writes outside the fleet stay allowed.
 path_matches() {
   local p="$1" prefix="$2" pc pr
   pc="$(casefold "$p")"
@@ -242,11 +251,164 @@ path_matches() {
   [[ "$pc" == "$pr" || "$pc" == "$pr"/* ]]
 }
 
+# identity_protected <path> -> 0 when the path's filesystem identity hits a
+# protected root. Exit 1 from the helper means "not this rule". Any other
+# failure fails closed for an attributed agent.
+identity_protected() {
+  local target="$1" rc=0
+  [[ "${_HAVE_PYTHON3:-0}" -eq 1 ]] || return 1
+  [[ -n "$target" ]] || return 1
+  local -a _id_args=()
+  _id_args+=("$target")
+  # hooks/approvals is denied for every caller, including the main session.
+  _id_args+=("dir:${FLEET_ROOT}/hooks/approvals")
+  if [[ -n "$agent" ]]; then
+    local _root _file _md
+    for _root in \
+      "${FLEET_ROOT}/hooks" \
+      "${FLEET_ROOT}/tests" \
+      "${FLEET_ROOT}/scripts" \
+      "${FLEET_ROOT}/tools" \
+      "${FLEET_ROOT}/.git" \
+      "${CLAUDE_HOME}/hooks" \
+      "${CLAUDE_HOME}/scripts" \
+      "${CLAUDE_HOME}/tools" \
+      "${CLAUDE_HOME}/rules" \
+      "$_CANON_GROK"
+    do
+      _id_args+=("dir:${_root}")
+    done
+    for _file in \
+      "${CLAUDE_HOME}/settings.json" \
+      "${CLAUDE_HOME}/settings.local.json" \
+      "${FLEET_ROOT}/.claude/settings.json" \
+      "${FLEET_ROOT}/.claude/settings.local.json" \
+      "$_CANON_SETTINGS_1" \
+      "$_CANON_SETTINGS_2" \
+      "${FLEET_ROOT}/.git/config"
+    do
+      _id_args+=("file:${_file}")
+    done
+    for _md in "${FLEET_ROOT}"/*.md; do
+      [[ -f "$_md" ]] && _id_args+=("file:${_md}")
+    done
+    _id_args+=("--")
+    _id_args+=(
+      "${FLEET_ROOT}/hooks"
+      "${FLEET_ROOT}/tests"
+      "${FLEET_ROOT}/scripts"
+      "${FLEET_ROOT}/tools"
+    )
+  else
+    _id_args+=("--")
+  fi
+  python3 -I - "${_id_args[@]}" <<'PY' || rc=$?
+import os
+import sys
+
+def dev_ino(path):
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_dev, st.st_ino)
+
+def main():
+    argv = sys.argv[1:]
+    if not argv:
+        return 1
+    target = argv[0]
+    specs = []
+    scan = []
+    mode = "spec"
+    for arg in argv[1:]:
+        if arg == "--":
+            mode = "scan"
+            continue
+        if mode == "spec":
+            specs.append(arg)
+        else:
+            scan.append(arg)
+    dir_ids = set()
+    file_ids = set()
+    for spec in specs:
+        kind, sep, path = spec.partition(":")
+        if not sep or not path:
+            continue
+        ident = dev_ino(path)
+        if ident is None:
+            continue
+        if kind == "dir":
+            dir_ids.add(ident)
+        elif kind == "file":
+            file_ids.add(ident)
+    for root in scan:
+        if not os.path.isdir(root):
+            continue
+        try:
+            walker = os.walk(root, followlinks=False)
+        except OSError:
+            continue
+        for dirpath, dirnames, filenames in walker:
+            kept = []
+            for name in dirnames:
+                child = os.path.join(dirpath, name)
+                if os.path.islink(child):
+                    continue
+                kept.append(name)
+            dirnames[:] = kept
+            for name in filenames:
+                path = os.path.join(dirpath, name)
+                if os.path.islink(path):
+                    continue
+                ident = dev_ino(path)
+                if ident is not None:
+                    file_ids.add(ident)
+    cur = target
+    found = None
+    while True:
+        if os.path.lexists(cur):
+            found = cur
+            break
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break
+        cur = parent
+    if found is None:
+        return 1
+    cur = found
+    while True:
+        ident = dev_ino(cur)
+        if ident is not None and (ident in dir_ids or ident in file_ids):
+            return 0
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break
+        cur = parent
+    return 1
+
+try:
+    sys.exit(main())
+except Exception:
+    sys.exit(2)
+PY
+  if [[ "$rc" -eq 0 ]]; then
+    return 0
+  fi
+  if [[ "$rc" -eq 1 ]]; then
+    return 1
+  fi
+  # Attributed writes fail closed when the identity check cannot run. A firmlink
+  # spelling must not become allowed because the checker crashed.
+  [[ -n "$agent" ]]
+}
+
 is_protected() {
   local p="$1"
   local hooks_prefix="${FLEET_ROOT}/hooks"
   local tests_prefix="${FLEET_ROOT}/tests"
   local scripts_prefix="${FLEET_ROOT}/scripts"
+  local tools_prefix="${FLEET_ROOT}/tools"
   case "$p" in
     */hooks/approvals|*/hooks/approvals/*) return 0 ;;
   esac
@@ -264,8 +426,10 @@ is_protected() {
     path_matches "$p" "$hooks_prefix" && return 0
     path_matches "$p" "$tests_prefix" && return 0
     path_matches "$p" "$scripts_prefix" && return 0
+    path_matches "$p" "$tools_prefix" && return 0
     path_matches "$p" "${CLAUDE_HOME}/hooks" && return 0
     path_matches "$p" "${CLAUDE_HOME}/scripts" && return 0
+    path_matches "$p" "${CLAUDE_HOME}/tools" && return 0
     path_matches "$p" "${CLAUDE_HOME}/settings.json" && return 0
     path_matches "$p" "${CLAUDE_HOME}/settings.local.json" && return 0
     # The live policy registry decides what agents may do; an agent writing it
@@ -286,6 +450,7 @@ is_protected() {
       path_matches "$p" "$settings_real" && return 0
     done
   fi
+  identity_protected "$p" && return 0
   return 1
 }
 

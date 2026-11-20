@@ -48,18 +48,44 @@ probe_err() { local out; out="$(probe "$@")"; printf '%s' "${out#*$'\t'}"; }
 
 echo "==> gate scope probes (ADR 0005)"
 
-# --- review-only fleet agents stay denied, everywhere ------------------------------
+# --- review roles with a CLI route: no general shell, everywhere (ADR 0008) --------
 OUTSIDE="$TMPD/unrelated-repo"; mkdir -p "$OUTSIDE"
 for a in mark octavion atia; do
   rc_in="$(probe_rc "$a" "$LIVE_CONTRACT" "$REPO_ROOT")"
   rc_out="$(probe_rc "$a" "$LIVE_CONTRACT" "$OUTSIDE")"
   if [ "$rc_in" -eq 2 ] && [ "$rc_out" -eq 2 ] \
-     && probe_err "$a" "$LIVE_CONTRACT" "$REPO_ROOT" | grep -q 'rule:review-only'; then
-    ok "fleet: $a (review_only) denied inside and outside the repo"
+     && probe_err "$a" "$LIVE_CONTRACT" "$REPO_ROOT" | grep -q 'rule:allowlist'; then
+    ok "fleet: $a (review_cli) generic command denied inside and outside the repo"
   else
     bad "fleet: $a not denied everywhere (inside=$rc_in outside=$rc_out)"
   fi
 done
+# The pinned wrapper is the one admitted shape, and only with the caller's own mapped role.
+for a in mark octavion atia; do
+  rc="$(probe_rc "$a" "$LIVE_CONTRACT" "$REPO_ROOT" "bash $REPO_ROOT/tools/agent-cli.sh $a hello")"
+  [ "$rc" -eq 0 ] && ok "fleet: $a (review_cli) pinned CLI wrapper allowed" \
+                  || bad "fleet: $a pinned CLI wrapper denied (exit=$rc)"
+  rc="$(probe_rc "$a" "$LIVE_CONTRACT" "$REPO_ROOT" "bash $REPO_ROOT/tools/agent-cli.sh nobody hello")"
+  [ "$rc" -eq 2 ] && ok "fleet: $a (review_cli) unmapped role denied" \
+                  || bad "fleet: $a unmapped role was not denied by the allowlist (exit=$rc)"
+  rc="$(probe_rc "$a" "$LIVE_CONTRACT" "$REPO_ROOT" "bash $REPO_ROOT/tools/agent-cli.sh $a --help")"
+  [ "$rc" -eq 2 ] && ok "fleet: $a (review_cli) option-looking prompt denied" \
+                  || bad "fleet: $a option-looking prompt was not denied (exit=$rc)"
+  # A word that used to be a vendor subcommand is ordinary prompt data now that
+  # every backend takes the prompt through an explicit channel (audit B8).
+  rc="$(probe_rc "$a" "$LIVE_CONTRACT" "$REPO_ROOT" "bash $REPO_ROOT/tools/agent-cli.sh $a help")"
+  [ "$rc" -eq 0 ] && ok "fleet: $a (review_cli) subcommand-looking prompt allowed" \
+                  || bad "fleet: $a subcommand-looking prompt was denied (exit=$rc)"
+  rc="$(probe_rc "$a" "$LIVE_CONTRACT" "$REPO_ROOT" "bash $REPO_ROOT/tools/agent-cli.sh $a /model")"
+  [ "$rc" -eq 2 ] && ok "fleet: $a (review_cli) slash-command prompt denied" \
+                  || bad "fleet: $a slash-command prompt was not denied (exit=$rc)"
+done
+rc="$(probe_rc mark "$LIVE_CONTRACT" "$REPO_ROOT" "bash $REPO_ROOT/tools/agent-cli.sh atia hello")"
+[ "$rc" -eq 2 ] && ok "fleet: mark cross-role atia route denied" \
+                || bad "fleet: mark cross-role atia route was not denied (exit=$rc)"
+rc="$(probe_rc pullo "$LIVE_CONTRACT" "$REPO_ROOT" "bash $REPO_ROOT/tools/agent-cli.sh mark hello")"
+[ "$rc" -eq 2 ] && ok "fleet: pullo cross-role mark route denied" \
+                || bad "fleet: pullo cross-role mark route was not denied (exit=$rc)"
 
 # --- executor roles are governed, not merely abstained on -------------------------
 # A command the allowlist explicitly refuses must deny with rule:allowlist, both
@@ -100,7 +126,7 @@ rc="$(probe_rc mark "$DAMAGED")"
 
 # An empty policy field is corruption too, not absence.
 EMPTYPOL="$TMPD/empty-policy.tsv"
-sed 's/^mark|\(.*\)|review_only$/mark|\1|/' "$LIVE_CONTRACT" > "$EMPTYPOL"
+sed 's/^mark|\(.*\)|review_cli$/mark|\1|/' "$LIVE_CONTRACT" > "$EMPTYPOL"
 rc="$(probe_rc mark "$EMPTYPOL")"
 [ "$rc" -eq 2 ] && ok "contract damage: an empty policy field is denied" \
                 || bad "an empty policy field was treated as an unknown agent (exit=$rc)"

@@ -25,7 +25,17 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 TMPD="$(mktemp -d)"
-trap 'rm -rf "$TMPD"' EXIT
+# Positive CLI fixtures must not live under mktemp: on Linux that is /tmp, which
+# the production resolver refuses. Track them separately so EXIT still removes them.
+HOME_FIXTURES=()
+cleanup_fixtures() {
+  rm -rf "$TMPD"
+  local d
+  for d in "${HOME_FIXTURES[@]+"${HOME_FIXTURES[@]}"}"; do
+    rm -rf "$d"
+  done
+}
+trap cleanup_fixtures EXIT
 mkdir -p "$TMPD/approvals"
 TEST_HOME="$TMPD/home"
 TEST_CONFIG="$TEST_HOME/.claude"
@@ -45,7 +55,7 @@ if [[ -d "$(dirname "$HOOK_SRC")/lib" ]]; then
 fi
 # Isolated fleet tree so restrict-mutator-write.sh derives FLEET_ROOT from its dirname.
 FLEET_FAKE="$TMPD/fleet"
-mkdir -p "$FLEET_FAKE/hooks/approvals" "$FLEET_FAKE/tests/fixtures"
+mkdir -p "$FLEET_FAKE/hooks/approvals" "$FLEET_FAKE/tests/fixtures" "$FLEET_FAKE/tools"
 WRITE_HOOK="$FLEET_FAKE/hooks/restrict-mutator-write.sh"
 if [[ -f "$WRITE_HOOK_SRC" ]]; then
   cp "$WRITE_HOOK_SRC" "$WRITE_HOOK"
@@ -56,6 +66,9 @@ if [[ -d "$TMPD/lib" ]]; then
 fi
 : > "$FLEET_FAKE/hooks/restrict-bash-by-agent.sh"
 : > "$FLEET_FAKE/tests/fixtures/agent-contract.tsv"
+: > "$FLEET_FAKE/tools/agent-cli.sh"
+ln -s "$FLEET_FAKE/tools/agent-cli.sh" "$TEST_CWD/agent-cli-link.sh"
+ln -s "$FLEET_FAKE/tools" "$TEST_CWD/tools-dir-link"
 HOOK_ROOT="$TMPD"
 HOOK_AUDIT_LOG="$TMPD/bash-gate.audit.log"
 
@@ -177,7 +190,7 @@ else
   FAIL=$((FAIL + 1)); echo "FAIL  missing agent_type attribution not observable (exit=$attribution_rc)"
 fi
 
-# --- review-only → always block ---
+# --- review roles: no general shell (ADR 0008) ---
 bt "mark bash block" "mark" "git status" 2
 bt "octavion bash block" "octavion" "ls" 2
 bt "atia bash block" "atia" "cat package.json" 2
@@ -374,7 +387,7 @@ else
 fi
 
 if grep -Eq '^[0-9]+ agent_type=e2e-runner rule=allowlist decision=allow$' "$HOOK_AUDIT_LOG" \
-   && grep -Eq '^[0-9]+ agent_type=mark rule=review-only decision=deny$' "$HOOK_AUDIT_LOG"; then
+   && grep -Eq '^[0-9]+ agent_type=mark rule=allowlist decision=deny$' "$HOOK_AUDIT_LOG"; then
   PASS=$((PASS + 1)); echo "PASS  hook audit logs timestamp, agent_type, rule, and decision"
 else
   FAIL=$((FAIL + 1)); echo "FAIL  hook audit log missing allow/deny decision lines"
@@ -406,6 +419,66 @@ wt "e2e-runner cannot rewrite agent contract" "e2e-runner" "$FLEET_FAKE/tests/fi
 wt "e2e-runner cannot rewrite live settings" "e2e-runner" "$TEST_HOME/.claude/settings.json" 2
 wt "e2e-runner cannot write approvals" "e2e-runner" "$FLEET_FAKE/hooks/approvals/with-deps" 2
 wt "e2e-runner cannot rewrite clipboard script" "e2e-runner" "$FLEET_FAKE/scripts/copy-prompt.sh" 2
+wt "vorenus cannot rewrite tools/agent-cli.sh" "vorenus" "$FLEET_FAKE/tools/agent-cli.sh" 2
+wt "posca cannot rewrite tools/ directory" "posca" "$FLEET_FAKE/tools" 2
+wt "vorenus cannot rewrite relative tools/agent-cli.sh" "vorenus" "tools/agent-cli.sh" 2 "$FLEET_FAKE"
+wt "vorenus cannot rewrite tools/agent-cli.sh via file symlink" "vorenus" "$TEST_CWD/agent-cli-link.sh" 2
+wt "vorenus cannot rewrite tools/agent-cli.sh via dir symlink" "vorenus" "$TEST_CWD/tools-dir-link/agent-cli.sh" 2
+wt "main session can edit tools/agent-cli.sh" "" "$FLEET_FAKE/tools/agent-cli.sh" 0
+wt "main session can edit tools/ directory" "" "$FLEET_FAKE/tools" 0
+for tool_target in "$FLEET_FAKE/tools/agent-cli.sh" "$FLEET_FAKE/tools" "$TEST_CWD/agent-cli-link.sh"; do
+  tool_out="$(printf '%s' "$(jq -nc --arg p "$tool_target" --arg c "$TEST_CWD" '{agent_type:"vorenus", cwd:$c, tool_input:{file_path:$p}}')" | "${HOOK_ENV[@]}" HOOK_LIB_DIR="$FLEET_FAKE/hooks/lib" bash "$WRITE_HOOK" 2>&1)"
+  tool_rc=$?
+  if [ "$tool_rc" -eq 2 ] && printf '%s' "$tool_out" | grep -q 'rule:self-protect'; then
+    PASS=$((PASS + 1)); echo "PASS  tools self-protect rule fires for $tool_target"
+  else
+    FAIL=$((FAIL + 1)); echo "FAIL  tools self-protect rule missing for $tool_target (exit=$tool_rc) :: $(printf '%s' "$tool_out" | head -1)"
+  fi
+done
+
+# B1: protection is filesystem identity, not the canonical string.
+# A second spelling of the same inode, and a hard link of a protected file,
+# must deny. A path outside the fleet must still be allowed.
+ln "$FLEET_FAKE/tools/agent-cli.sh" "$TEST_CWD/agent-cli-hardlink"
+wt "vorenus cannot rewrite tools/agent-cli.sh via hard link" "vorenus" "$TEST_CWD/agent-cli-hardlink" 2
+hard_out="$(printf '%s' "$(jq -nc --arg p "$TEST_CWD/agent-cli-hardlink" --arg c "$TEST_CWD" '{agent_type:"vorenus", cwd:$c, tool_input:{file_path:$p}}')" | "${HOOK_ENV[@]}" HOOK_LIB_DIR="$FLEET_FAKE/hooks/lib" bash "$WRITE_HOOK" 2>&1)"
+hard_rc=$?
+if [ "$hard_rc" -eq 2 ] && printf '%s' "$hard_out" | grep -q 'rule:self-protect'; then
+  PASS=$((PASS + 1)); echo "PASS  hard link to wrapper fires rule:self-protect"
+else
+  FAIL=$((FAIL + 1)); echo "FAIL  hard link to wrapper missing rule:self-protect (exit=$hard_rc) :: $(printf '%s' "$hard_out" | head -1)"
+fi
+wt "vorenus can write outside the fleet" "vorenus" "$TEST_CWD/outside-fleet.txt" 0
+
+B1_REAL="$(python3 -I -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$FLEET_FAKE")"
+B1_DATA="/System/Volumes/Data${B1_REAL}/tools/agent-cli.sh"
+if [[ -e "$B1_DATA" ]] && python3 -I -c 'import os,sys; sys.exit(0 if os.path.samefile(sys.argv[1], sys.argv[2]) else 1)' "$B1_DATA" "$FLEET_FAKE/tools/agent-cli.sh"; then
+  wt "vorenus cannot rewrite tools/agent-cli.sh via /System/Volumes/Data spelling" "vorenus" "$B1_DATA" 2
+  data_out="$(printf '%s' "$(jq -nc --arg p "$B1_DATA" '{agent_type:"vorenus", tool_input:{file_path:$p}}')" | "${HOOK_ENV[@]}" HOOK_LIB_DIR="$FLEET_FAKE/hooks/lib" bash "$WRITE_HOOK" 2>&1)"
+  data_rc=$?
+  if [ "$data_rc" -eq 2 ] && printf '%s' "$data_out" | grep -q 'rule:self-protect'; then
+    PASS=$((PASS + 1)); echo "PASS  Data-volume spelling fires rule:self-protect"
+  else
+    FAIL=$((FAIL + 1)); echo "FAIL  Data-volume spelling missing rule:self-protect (exit=$data_rc) :: $(printf '%s' "$data_out" | head -1)"
+  fi
+elif [[ "$(uname -s)" == Darwin ]]; then
+  FAIL=$((FAIL + 1)); echo "FAIL  Data-volume spelling of the fleet fixture is not present on Darwin"
+else
+  PASS=$((PASS + 1)); echo "PASS  Data-volume spelling skipped (not a Darwin firmlink host)"
+fi
+B1_VAR=""
+case "$B1_REAL" in
+  /private/var/*) B1_VAR="/var/${B1_REAL#/private/var/}/tools/agent-cli.sh" ;;
+  /var/*) B1_VAR="/private${B1_REAL}/tools/agent-cli.sh" ;;
+esac
+if [[ -n "$B1_VAR" && -e "$B1_VAR" ]] && python3 -I -c 'import os,sys; sys.exit(0 if os.path.samefile(sys.argv[1], sys.argv[2]) else 1)' "$B1_VAR" "$FLEET_FAKE/tools/agent-cli.sh"; then
+  wt "vorenus cannot rewrite tools/agent-cli.sh via /var spelling" "vorenus" "$B1_VAR" 2
+elif [[ "$(uname -s)" == Darwin ]]; then
+  FAIL=$((FAIL + 1)); echo "FAIL  /var and /private/var spellings of the fleet fixture do not share an inode"
+else
+  PASS=$((PASS + 1)); echo "PASS  /var spelling skipped (no /private/var alias on this host)"
+fi
+
 wt "e2e-runner cannot rewrite agent prompt file" "e2e-runner" "$FLEET_FAKE/architect.md" 2
 wt "e2e-runner cannot rewrite live claude hooks" "e2e-runner" "$TEST_HOME/.claude/hooks/strategic-compact/suggest-compact.sh" 2
 wt "e2e-runner cannot rewrite live claude scripts" "e2e-runner" "$TEST_HOME/.claude/scripts/otty-wrapper.sh" 2
@@ -607,9 +680,10 @@ lt_rule() {
 }
 
 echo "==> live fleet policy matrix (7 roles)"
+# ADR 0008: these review roles hold Bash only for the pinned CLI wrapper.
 for a in mark octavion atia; do
-  lt_rule "live: $a (review_only) denied inside the fleet" "$a" "git status" 2 "rule:review-only" "$TMPD"
-  lt_rule "live: $a (review_only) denied outside the fleet" "$a" "git status" 2 "rule:review-only" "$TEST_CWD"
+  lt_rule "live: $a (review_cli) generic command denied inside the fleet" "$a" "git status" 2 "rule:allowlist" "$TMPD"
+  lt_rule "live: $a (review_cli) generic command denied outside the fleet" "$a" "git status" 2 "rule:allowlist" "$TEST_CWD"
 done
 lt_rule "live: anthory (orchestrator) git status allowed" "anthory" "git status" 0 "" "$TEST_CWD"
 lt_rule "live: anthory (orchestrator) git push allowed" "anthory" "git push origin main" 0 "" "$TEST_CWD"
@@ -683,6 +757,189 @@ done
 for a in vorenus pullo posca anthory; do
   xt "live: $a (executor) fleet test script allowed" "$a" "bash $REPO_ROOT/tests/run_all.sh" 0 ""
 done
+
+# Executor and orchestrator roles reach the same wrapper through the allowlist,
+# bound to their own attributed agent_type. anthory and pullo have no CLI mapping.
+for a in vorenus posca; do
+  xt "live: $a (executor) pinned CLI wrapper allowed" "$a" "bash $REPO_ROOT/tools/agent-cli.sh $a hello" 0 ""
+  xt "live: $a (executor) sh rejected for CLI wrapper" "$a" "sh $REPO_ROOT/tools/agent-cli.sh $a hello" 2 "rule:allowlist"
+done
+xt "live: vorenus cross-role posca route denied" "vorenus" "bash $REPO_ROOT/tools/agent-cli.sh posca hello" 2 "rule:allowlist"
+xt "live: posca cross-role mark route denied" "posca" "bash $REPO_ROOT/tools/agent-cli.sh mark hello" 2 "rule:allowlist"
+xt "live: pullo cross-role mark route denied" "pullo" "bash $REPO_ROOT/tools/agent-cli.sh mark hello" 2 "rule:allowlist"
+xt "live: pullo unmapped own route denied" "pullo" "bash $REPO_ROOT/tools/agent-cli.sh pullo hello" 2 "rule:allowlist"
+xt "live: anthory cross-role mark route denied" "anthory" "bash $REPO_ROOT/tools/agent-cli.sh mark hello" 2 "rule:allowlist"
+xt "live: anthory unmapped own route denied" "anthory" "bash $REPO_ROOT/tools/agent-cli.sh anthory hello" 2 "rule:allowlist"
+for a in vorenus posca anthory; do
+  xt "live: $a (write role) unmapped CLI role denied" "$a" "bash $REPO_ROOT/tools/agent-cli.sh nobody hello" 2 "rule:allowlist"
+done
+
+# review_cli roles (ADR 0008): the pinned wrapper is the one admitted shape, bound to caller.
+for a in mark octavion atia; do
+  xt "live: $a (review_cli) pinned CLI wrapper allowed" "$a" "bash $REPO_ROOT/tools/agent-cli.sh $a hello" 0 ""
+  xt "live: $a (review_cli) sh rejected for CLI wrapper" "$a" "sh $REPO_ROOT/tools/agent-cli.sh $a hello" 2 "rule:allowlist"
+  xt "live: $a (review_cli) unmapped role denied" "$a" "bash $REPO_ROOT/tools/agent-cli.sh nobody hello" 2 "rule:allowlist"
+  xt "live: $a (review_cli) other fleet script denied" "$a" "bash $REPO_ROOT/tests/run_all.sh" 2 "rule:allowlist"
+done
+xt "live: mark cross-role atia route denied" "mark" "bash $REPO_ROOT/tools/agent-cli.sh atia hello" 2 "rule:allowlist"
+xt "live: octavion cross-role mark route denied" "octavion" "bash $REPO_ROOT/tools/agent-cli.sh mark hello" 2 "rule:allowlist"
+xt "live: atia cross-role vorenus route denied" "atia" "bash $REPO_ROOT/tools/agent-cli.sh vorenus hello" 2 "rule:allowlist"
+
+# Path identity / alias rejection for tools/agent-cli.sh (#4)
+mkdir -p "$TEST_CWD/tools"
+cp "$REPO_ROOT/tools/agent-cli.sh" "$TEST_CWD/tools/agent-cli.sh"
+ln -sf "$REPO_ROOT/tools/agent-cli.sh" "$TEST_CWD/alias-agent-cli.sh"
+ln -sf "$REPO_ROOT" "$TMPD/fleet-link"
+xt "live: mark relative tools/agent-cli.sh outside fleet root denied" "mark" "bash tools/agent-cli.sh mark hello" 2 "rule:allowlist"
+xt "live: vorenus relative tools/agent-cli.sh outside fleet root denied" "vorenus" "bash tools/agent-cli.sh vorenus hello" 2 "rule:allowlist"
+xt "live: mark relative wrapper path denied (audit B4)" "mark" "bash tools/agent-cli.sh mark hello" 2 "rule:allowlist"
+xt "live: mark same-named outside-fleet tools/agent-cli.sh denied" "mark" "bash $TEST_CWD/tools/agent-cli.sh mark hello" 2 "rule:allowlist"
+xt "live: mark symlink to wrapper denied" "mark" "bash $TEST_CWD/alias-agent-cli.sh mark hello" 2 "rule:allowlist"
+xt "live: mark symlinked fleet root to wrapper denied" "mark" "bash $TMPD/fleet-link/tools/agent-cli.sh mark hello" 2 "rule:allowlist"
+xt "live: mark .. traversal to wrapper denied" "mark" "bash $REPO_ROOT/tests/../tools/agent-cli.sh mark hello" 2 "rule:allowlist"
+# The hook authorizes the wrapper shape only; prompt content is the wrapper's
+# responsibility (see the PATH-shim block below). A prompt-looking argument is
+# data here, never a reason for the gate to deny the dispatch.
+xt "live: mark missing prompt denied" "mark" "bash $REPO_ROOT/tools/agent-cli.sh mark" 2 "rule:allowlist"
+xt "live: mark option-looking prompt denied" "mark" "bash $REPO_ROOT/tools/agent-cli.sh mark --help" 2 "rule:allowlist"
+xt "live: octavion subcommand-looking prompt is data" "octavion" "bash $REPO_ROOT/tools/agent-cli.sh octavion help" 0 ""
+xt "live: mark slash-command-looking prompt denied" "mark" "bash $REPO_ROOT/tools/agent-cli.sh mark /model" 2 "rule:allowlist"
+LONG_PROMPT="$(python3 -c "print('a'*17000)")"
+xt "live: oversized command denied before tokenization" "mark" "bash $REPO_ROOT/tools/agent-cli.sh mark $LONG_PROMPT" 2 "rule:command-too-long"
+xt "live: mark prompt containing word curl allowed" "mark" "bash $REPO_ROOT/tools/agent-cli.sh mark 'why did curl fail'" 0 ""
+xt "live: vorenus prompt containing word curl allowed" "vorenus" "bash $REPO_ROOT/tools/agent-cli.sh vorenus 'why did curl fail'" 0 ""
+
+# --- tools/agent-cli.sh runtime argv, prompt-channel & binary-trust tests (#5, #7, #8, #9, #12, #15) ---
+echo "==> tools/agent-cli.sh wrapper argv & prompt channel (PATH shims)"
+# Audit B9: the production resolver refuses /tmp, and on Linux CI mktemp -d is
+# /tmp. Keep positive fixtures under $HOME (700), which the resolver permits, and
+# pin their hashes through the wrapper's test seam.
+CLI_SHIMS="${HOME}/.cache/fleet-cli-shims.$$"
+SHIM_CAPTURED="$TMPD/shim-captured.txt"
+CLI_PIN_FILE="$TMPD/cli-sha256"
+mkdir -p "$CLI_SHIMS"
+chmod 700 "$CLI_SHIMS"
+trap 'rm -rf "$CLI_SHIMS"' EXIT
+for backend in agy codex grok; do
+  cat > "$CLI_SHIMS/$backend" <<EOF
+#!/usr/bin/env bash
+{
+  printf 'bin=%s\n' "$backend"
+  idx=0
+  for a in "\$@"; do
+    printf 'arg[%d]=%s\n' "\$idx" "\$a"
+    idx=\$((idx + 1))
+  done
+  if [ "$backend" = "codex" ]; then
+    printf 'stdin=%s\n' "\$(cat)"
+  fi
+} > "$SHIM_CAPTURED"
+exit 0
+EOF
+  chmod 755 "$CLI_SHIMS/$backend"
+done
+: > "$CLI_PIN_FILE"
+for backend in agy codex grok; do
+  printf '%s %s\n' "$backend" "$(shasum -a 256 "$CLI_SHIMS/$backend" | awk '{print $1}')" >> "$CLI_PIN_FILE"
+done
+
+assert_cli_dispatch() {
+  local desc="$1" role="$2" prompt_text="$3" expected_lines="$4" out rc
+  rm -f "$SHIM_CAPTURED"
+  out="$(PATH="$CLI_SHIMS:$PATH" FLEET_CLI_PIN_FILE="$CLI_PIN_FILE" bash "$REPO_ROOT/tools/agent-cli.sh" "$role" "$prompt_text" 2>&1)"
+  rc=$?
+  if [ "$rc" -eq 0 ] && [ -f "$SHIM_CAPTURED" ] && [ "$(cat "$SHIM_CAPTURED")" = "$expected_lines" ]; then
+    PASS=$((PASS + 1)); echo "PASS  $desc"
+  else
+    FAIL=$((FAIL + 1)); echo "FAIL  $desc (rc=$rc) got=[$(cat "$SHIM_CAPTURED" 2>/dev/null | tr '\n' '|')] want=[$(printf '%s' "$expected_lines" | tr '\n' '|')] err=[$out]"
+  fi
+}
+
+assert_cli_dispatch "wrapper argv: mark -> agy gemini-4-hydrogen-xhigh" "mark" "check user intent" \
+$'bin=agy\narg[0]=--sandbox\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-4-hydrogen-xhigh\narg[4]=--print=check user intent'
+
+assert_cli_dispatch "wrapper argv: posca -> agy gemini-4-argon-high" "posca" "audit plan" \
+$'bin=agy\narg[0]=--sandbox\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-4-argon-high\narg[4]=--print=audit plan'
+
+assert_cli_dispatch "wrapper argv: vorenus -> agy gemini-pro-orchestrator-neon" "vorenus" "implement fix" \
+$'bin=agy\narg[0]=--sandbox\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-pro-orchestrator-neon\narg[4]=--print=implement fix'
+
+assert_cli_dispatch "wrapper argv: octavion -> codex gpt-6.2-sol stdin channel" "octavion" "plan architecture" \
+$'bin=codex\narg[0]=exec\narg[1]=--ignore-user-config\narg[2]=-s\narg[3]=read-only\narg[4]=-m\narg[5]=gpt-6.2-sol\narg[6]=-c\narg[7]=model_reasoning_effort=xhigh\narg[8]=-\nstdin=plan architecture'
+
+assert_cli_dispatch "wrapper argv: atia -> grok grok-4.7 -p last" "atia" "spot check process" \
+$'bin=grok\narg[0]=--sandbox\narg[1]=read-only\narg[2]=--tools\narg[3]=read_file,grep,list_dir\narg[4]=--model\narg[5]=grok-4.7\narg[6]=-p\narg[7]=spot check process'
+
+assert_cli_dispatch "wrapper accepts an ordinary prompt that begins with Review" "mark" "Review the patch for intent drift" \
+$'bin=agy\narg[0]=--sandbox\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-4-hydrogen-xhigh\narg[4]=--print=Review the patch for intent drift'
+
+# Stdin prompt channel works for valid main-session stdin and rejects option/subcommand/slash-command payloads
+rm -f "$SHIM_CAPTURED"
+if printf 'stdin prompt ok' | PATH="$CLI_SHIMS:$PATH" FLEET_CLI_PIN_FILE="$CLI_PIN_FILE" bash "$REPO_ROOT/tools/agent-cli.sh" octavion >/dev/null 2>&1 \
+   && grep -qx 'stdin=stdin prompt ok' "$SHIM_CAPTURED" 2>/dev/null; then
+  PASS=$((PASS + 1)); echo "PASS  wrapper stdin: valid stdin prompt forwarded to codex"
+else
+  FAIL=$((FAIL + 1)); echo "FAIL  wrapper stdin: valid stdin prompt failed"
+fi
+
+for bad_prompt in "--help" "-h" "/model" "/help" "   "; do
+  # Audit B10: a passing control with the same fixture proves the rejection below
+  # comes from prompt validation, not from the fixture being refused outright.
+  rm -f "$SHIM_CAPTURED"
+  control_out="$(PATH="$CLI_SHIMS:$PATH" FLEET_CLI_PIN_FILE="$CLI_PIN_FILE" bash "$REPO_ROOT/tools/agent-cli.sh" octavion "control prompt" 2>&1)"
+  control_rc=$?
+  rm -f "$SHIM_CAPTURED"
+  err_arg="$(PATH="$CLI_SHIMS:$PATH" FLEET_CLI_PIN_FILE="$CLI_PIN_FILE" bash "$REPO_ROOT/tools/agent-cli.sh" octavion "$bad_prompt" 2>&1)"
+  rc_arg=$?
+  err_stdin="$(printf '%s' "$bad_prompt" | PATH="$CLI_SHIMS:$PATH" FLEET_CLI_PIN_FILE="$CLI_PIN_FILE" bash "$REPO_ROOT/tools/agent-cli.sh" octavion 2>&1)"
+  rc_stdin=$?
+  if [ "$control_rc" -eq 0 ] && [ "$rc_arg" -eq 2 ] && [ "$rc_stdin" -eq 2 ] \
+     && [ ! -e "$SHIM_CAPTURED" ] \
+     && printf '%s' "$err_arg" | grep -qE 'refused|empty prompt'; then
+    PASS=$((PASS + 1)); echo "PASS  wrapper rejects option/slash/blank prompt (argv & stdin): [$bad_prompt]"
+  else
+    FAIL=$((FAIL + 1)); echo "FAIL  wrapper accepted unsafe prompt [$bad_prompt] (rc_arg=$rc_arg rc_stdin=$rc_stdin)"
+  fi
+done
+
+# Error output must not echo secret/rejected prompt text (#12)
+secret_probe="--secret-token-987654"
+secret_err="$(PATH="$CLI_SHIMS:$PATH" FLEET_CLI_PIN_FILE="$CLI_PIN_FILE" bash "$REPO_ROOT/tools/agent-cli.sh" mark "$secret_probe" 2>&1)"
+secret_rc=$?
+if [ "$secret_rc" -eq 2 ] && ! printf '%s' "$secret_err" | grep -qF "$secret_probe"; then
+  PASS=$((PASS + 1)); echo "PASS  wrapper does not echo rejected prompt text to stderr"
+else
+  FAIL=$((FAIL + 1)); echo "FAIL  wrapper echoed rejected prompt text (rc=$secret_rc err=$secret_err)"
+fi
+
+# Untrusted binary locations (/tmp and fleet tree) must be refused (#5)
+UNTRUSTED_TMP_BIN="/tmp/agent-cli-untrusted-$$"
+mkdir -p "$UNTRUSTED_TMP_BIN"
+cp "$CLI_SHIMS/agy" "$UNTRUSTED_TMP_BIN/agy"
+chmod 755 "$UNTRUSTED_TMP_BIN/agy"
+rm -f "$SHIM_CAPTURED"
+untrusted_out="$(PATH="$UNTRUSTED_TMP_BIN:$CLI_SHIMS:$PATH" FLEET_CLI_PIN_FILE="$CLI_PIN_FILE" bash "$REPO_ROOT/tools/agent-cli.sh" mark "hello" 2>&1)"
+untrusted_rc=$?
+rm -rf "$UNTRUSTED_TMP_BIN"
+if [ "$untrusted_rc" -eq 2 ] && [ ! -e "$SHIM_CAPTURED" ] && printf '%s' "$untrusted_out" | grep -q 'untrusted executable'; then
+  PASS=$((PASS + 1)); echo "PASS  wrapper refuses binary located under /tmp"
+else
+  FAIL=$((FAIL + 1)); echo "FAIL  wrapper did not refuse /tmp binary (rc=$untrusted_rc out=$untrusted_out)"
+fi
+
+cp "$REPO_ROOT/tools/agent-cli.sh" "$FLEET_FAKE/tools/agent-cli.sh"
+chmod +x "$FLEET_FAKE/tools/agent-cli.sh"
+cp "$CLI_SHIMS/agy" "$FLEET_FAKE/tools/agy"
+chmod 755 "$FLEET_FAKE/tools/agy"
+rm -f "$SHIM_CAPTURED"
+fleet_bin_out="$(PATH="$FLEET_FAKE/tools:$CLI_SHIMS:$PATH" HOOK_LIB_DIR="$FLEET_FAKE/hooks/lib" bash "$FLEET_FAKE/tools/agent-cli.sh" mark "hello" 2>&1)"
+fleet_bin_rc=$?
+rm -f "$FLEET_FAKE/tools/agy"
+if [ "$fleet_bin_rc" -eq 2 ] && [ ! -e "$SHIM_CAPTURED" ] && printf '%s' "$fleet_bin_out" | grep -q 'untrusted executable'; then
+  PASS=$((PASS + 1)); echo "PASS  wrapper refuses binary located inside the fleet tree"
+else
+  FAIL=$((FAIL + 1)); echo "FAIL  wrapper did not refuse fleet-tree binary (rc=$fleet_bin_rc out=$fleet_bin_out)"
+fi
 
 echo "==> executor allowlist: denied commands"
 # Each row carries the rule that must fire. Commands rejected by an earlier layer

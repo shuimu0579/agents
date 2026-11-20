@@ -212,14 +212,14 @@ else
 fi
 
 echo
-# --- live 7-role policy: a review-only identity is denied Bash ---
+# --- live 7-role policy: a review role gets no general shell (ADR 0008) ---
 live_payload='{"session_id":"e2e-session","transcript_path":"/tmp/e2e-transcript.jsonl","hook_event_name":"PreToolUse","tool_name":"Bash","agent_type":"mark","tool_input":{"command":"git status"}}'
 live_denied="$(cd "$SAFE_CWD" && printf '%s' "$live_payload" | env -i PATH="$PATH" TMPDIR="$TMP_ROOT" CLAUDE_CONFIG_DIR="$TMP_HOME/.claude" HOOK_LIB_DIR="$REPO_ROOT/hooks/lib" E2E_ALLOWED_HOSTS= BASE_URL=http://localhost:3000 HOME="$TMP_HOME" APPROVAL_DIR="$APPROVAL_DIR" AGENT_CONTRACT_FILE="$LIVE_CONTRACT_FILE" HOOK_AUDIT_LOG="$AUDIT_LOG" "$HOOK" 2>&1)"
 live_rc=$?
-if [[ "$live_rc" -eq 2 ]] && printf '%s' "$live_denied" | grep -q 'rule:review-only'; then
-  pass "live contract: a review-only identity is denied Bash"
+if [[ "$live_rc" -eq 2 ]] && printf '%s' "$live_denied" | grep -q 'rule:allowlist'; then
+  pass "live contract: a review role gets no general shell"
 else
-  fail "live contract did not deny the review-only payload (exit=$live_rc; output: $(printf '%s' "$live_denied" | tr '\n' ' | '))"
+  fail "live contract did not deny the generic command (exit=$live_rc; output: $(printf '%s' "$live_denied" | tr '\n' ' | '))"
 fi
 
 echo "==> result: $PASS passed, $FAIL failed"

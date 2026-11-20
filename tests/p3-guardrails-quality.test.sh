@@ -37,11 +37,18 @@ echo "==> contract-gate meta-probes (the gate must reject each planted violation
 protect mark.md
 python3 - <<'PY'
 p="mark.md"; s=open(p,encoding="utf-8").read()
-s=s.replace("tools: Read, Grep, Glob","tools: Read, Grep, Glob\ntools: Read, Write, Edit, Bash, Grep, Glob",1)
+target="tools: Read, Grep, Glob, Bash"
+assert target in s, "expected valid first tools declaration in mark.md"
+s=s.replace(target, target + "\ntools: Read, Write, Edit, Bash, Grep, Glob", 1)
 open(p,"w",encoding="utf-8").write(s)
 PY
-if gate_fails; then ok "#26 duplicate frontmatter key is rejected"
-else bad "#26 duplicate 'tools:' passed — gate read [Read, Grep, Glob] while YAML reads Bash"; fi
+dup_out="$(bash tests/guardrails.sh --strict 2>&1)"
+dup_rc=$?
+if [ "$dup_rc" -ne 0 ] && printf '%s' "$dup_out" | grep -q 'duplicate frontmatter key: tools'; then
+  ok "#26 duplicate frontmatter key is rejected"
+else
+  bad "#26 duplicate 'tools:' did not fail on duplicate frontmatter key (rc=$dup_rc)";
+fi
 restore mark.md
 
 # --- #26b: a file with no frontmatter delimiters at all must not satisfy field

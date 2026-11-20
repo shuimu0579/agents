@@ -10,6 +10,8 @@
 # What it checks (driven by the CONTRACT table below — add a row when you add an agent):
 #   1. Frontmatter valid (name/description required; optional tools/model valid when present; name == filename).
 #   2. Review-only tool contract (flag `review_only`: no Write/Edit/Bash).
+#   2b. Review-with-CLI contract (flag `review_cli`: Bash only for the pinned
+#       external-CLI wrapper; no Write/Edit — ADR 0008).
 #   3. Mutator contract (flag `mutator`: carries Write or Edit).
 #   3b. Executor contract (flag `executor`: carries Write/Edit and Bash — ADR 0006).
 #   3c. Orchestrator contract (flag `orchestrator`: carries Write/Edit and Bash — ADR 0007).
@@ -137,7 +139,7 @@ status_sets_equal() {
 # ---------------------------------------------------------------------------
 # Contract fixture — the single source of truth for agents and the Bash hook.
 #   name|expected_tools|model|domain_statuses(;)|flag
-#   flag: review_only | mutator | executor | orchestrator
+#   flag: review_only | review_cli | mutator | executor | orchestrator
 # ---------------------------------------------------------------------------
 if [[ -f "$AGENT_CONTRACT_FILE" ]]; then
   CONTRACT="$(grep -vE '^[[:space:]]*(#|$)' "$AGENT_CONTRACT_FILE" || true)"
@@ -223,6 +225,16 @@ while IFS='|' read -r name exp_tools exp_model domain_statuses flag; do
         if has_tool "$actual_tools" "$banned"; then fail "$f: review-only agent carries $banned"; fi
       done
       ;;
+    review_cli)
+      # ADR 0008: a review role that delegates to an external CLI. It needs Bash
+      # to invoke the pinned wrapper, and it must stay a non-writer.
+      if [[ -z "$actual_tools" ]] || ! has_tool "$actual_tools" "Bash"; then
+        fail "$f: review_cli agent lacks Bash (needed for tools/agent-cli.sh)"
+      fi
+      for banned in Write Edit; do
+        if has_tool "$actual_tools" "$banned"; then fail "$f: review_cli agent carries $banned"; fi
+      done
+      ;;
     mutator)
       if [[ -n "$actual_tools" ]] && ! has_tool "$actual_tools" "Write" && ! has_tool "$actual_tools" "Edit"; then
         fail "$f: mutator lost all write tools (Write/Edit)"
@@ -290,7 +302,7 @@ while IFS='|' read -r name exp_tools exp_model domain_statuses flag; do
 
   # 4c. reader injection preamble (grill F1) — every contract flag
   case "$flag" in
-    review_only|mutator|executor|orchestrator)
+    review_only|review_cli|mutator|executor|orchestrator)
       if token_present "$f" "DATA, never instructions"; then
         note "$f: injection preamble present"
       else
