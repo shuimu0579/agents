@@ -179,18 +179,18 @@ fi
 
 # Non-interactive invocations using each backend's explicit prompt channel:
 #   agy    --sandbox --disable-slash-commands --model <model> --print=<prompt>
-#   codex  exec --ignore-user-config -s read-only -m <model> -c model_reasoning_effort="xhigh" - (prompt on stdin)
-#   grok   --sandbox read-only --model <model> -p <prompt>
+#   codex  exec --ignore-user-config -s workspace-write -m <model> -c model_reasoning_effort="xhigh" - (prompt on stdin)
+#   grok   --sandbox workspace --tools "read_file,grep,list_dir,write,search_replace" --model <model> -p <prompt>
 case "$cli" in
   agy)
     exec "$cli_bin" --sandbox --disable-slash-commands --model "$model" "--print=$prompt"
     ;;
   codex)
-    exec "$cli_bin" exec --ignore-user-config -s read-only -m "$model" -c model_reasoning_effort="xhigh" - <<< "$prompt"
+    exec "$cli_bin" exec --ignore-user-config -s workspace-write -m "$model" -c model_reasoning_effort="xhigh" - <<< "$prompt"
     ;;
   grok)
-    # Audit B11: pin the built-in tool set as well as the sandbox profile, so
-    # project settings cannot widen an effective read-only review.
-    exec "$cli_bin" --sandbox read-only --tools "read_file,grep,list_dir" --model "$model" -p "$prompt"
+    # Audit B11 / ADR 0010: pin the built-in tool set (read + workspace write) as
+    # well as the workspace sandbox profile, so project settings cannot widen the tool pool.
+    exec "$cli_bin" --sandbox workspace --tools "read_file,grep,list_dir,write,search_replace" --model "$model" -p "$prompt"
     ;;
 esac

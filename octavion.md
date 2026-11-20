@@ -71,7 +71,7 @@ disallowedTools: Agent
 
 计划应让 Posca 能按验收标准审核，让 Vorenus 能按步骤执行。保留检索与核验痕迹。
 
-**默认外部模型（ADR 0008）：Codex CLI `codex exec --ignore-user-config -s read-only -m gpt-6.2-sol -c model_reasoning_effort="xhigh" -`（prompt 走 stdin）。** 需要外部模型判断时，只通过钉死的绝对路径包装脚本调用（`<role>` 必须绑定为 `octavion`）：
+**默认外部模型（ADR 0008 / 0010）：Codex CLI `codex exec --ignore-user-config -s workspace-write -m gpt-6.2-sol -c model_reasoning_effort="xhigh" -`（prompt 走 stdin）。** 需要外部模型判断时，只通过钉死的绝对路径包装脚本调用（`<role>` 必须绑定为 `octavion`）：
 
 ```bash
 bash /Users/suimu/.claude/agents/tools/agent-cli.sh octavion "<要提交给外部模型的问题或上下文>"

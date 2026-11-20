@@ -865,10 +865,10 @@ assert_cli_dispatch "wrapper argv: vorenus -> agy gemini-pro-orchestrator-neon" 
 $'bin=agy\narg[0]=--sandbox\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-pro-orchestrator-neon\narg[4]=--print=implement fix'
 
 assert_cli_dispatch "wrapper argv: octavion -> codex gpt-6.2-sol stdin channel" "octavion" "plan architecture" \
-$'bin=codex\narg[0]=exec\narg[1]=--ignore-user-config\narg[2]=-s\narg[3]=read-only\narg[4]=-m\narg[5]=gpt-6.2-sol\narg[6]=-c\narg[7]=model_reasoning_effort=xhigh\narg[8]=-\nstdin=plan architecture'
+$'bin=codex\narg[0]=exec\narg[1]=--ignore-user-config\narg[2]=-s\narg[3]=workspace-write\narg[4]=-m\narg[5]=gpt-6.2-sol\narg[6]=-c\narg[7]=model_reasoning_effort=xhigh\narg[8]=-\nstdin=plan architecture'
 
 assert_cli_dispatch "wrapper argv: atia -> grok grok-4.7 -p last" "atia" "spot check process" \
-$'bin=grok\narg[0]=--sandbox\narg[1]=read-only\narg[2]=--tools\narg[3]=read_file,grep,list_dir\narg[4]=--model\narg[5]=grok-4.7\narg[6]=-p\narg[7]=spot check process'
+$'bin=grok\narg[0]=--sandbox\narg[1]=workspace\narg[2]=--tools\narg[3]=read_file,grep,list_dir,write,search_replace\narg[4]=--model\narg[5]=grok-4.7\narg[6]=-p\narg[7]=spot check process'
 
 assert_cli_dispatch "wrapper accepts an ordinary prompt that begins with Review" "mark" "Review the patch for intent drift" \
 $'bin=agy\narg[0]=--sandbox\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-4-hydrogen-xhigh\narg[4]=--print=Review the patch for intent drift'

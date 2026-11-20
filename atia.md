@@ -70,7 +70,7 @@ disallowedTools: Agent
 
 Mark 管理解，你管过程，Posca 管成果与记录。监督意见不是用户批准。不要循环唤醒全队。
 
-**默认外部模型（ADR 0008）：`grok --sandbox read-only --model grok-4.7 -p "<prompt>"`（当前最新）。** 需要外部模型判断时，只通过钉死的绝对路径包装脚本调用（`<role>` 必须绑定为 `atia`）：
+**默认外部模型（ADR 0008 / 0010）：`grok --sandbox workspace --tools "read_file,grep,list_dir,write,search_replace" --model grok-4.7 -p "<prompt>"`（当前最新）。** 需要外部模型判断时，只通过钉死的绝对路径包装脚本调用（`<role>` 必须绑定为 `atia`）：
 
 ```bash
 bash /Users/suimu/.claude/agents/tools/agent-cli.sh atia "<要提交给外部模型的问题或上下文>"

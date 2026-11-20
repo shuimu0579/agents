@@ -184,7 +184,7 @@ case "$agent_policy" in
     ;;
   # Review roles that delegate to an external CLI (ADR 0008). They are still not
   # writers and get no general shell: the only admitted command is the pinned
-  # wrapper, which owns the CLI, model and read-only flags.
+  # wrapper, which owns the CLI, model and sandbox flags.
   review_cli) REVIEW_CLI=1 ;;
   mutator) ;;
   # Executor roles (ADR 0006): write + run. The allowlist is applied after the
@@ -242,7 +242,7 @@ fi
 # --- Review roles with a pinned CLI route (ADR 0008) ---
 # Exactly one admitted shape: bash <fleet>/tools/agent-cli.sh <role> [words...].
 # The role selector must match the attributed caller. These roles still hold no
-# general shell; the wrapper fixes CLI, model and the read-only flags, and
+# general shell; the wrapper fixes CLI, model and the sandbox flags, and
 # refuses options of its own.
 if [[ "$REVIEW_CLI" -eq 1 ]]; then
   declare -F exec_is_agent_cli >/dev/null 2>&1 ||

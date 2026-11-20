@@ -112,7 +112,7 @@ agents/
 ├── atia.md                    # Process spot check
 ├── vorenus.md                 # Primary implementation
 ├── pullo.md                   # Fallback implementation
-├── adr/                       # MADR architecture decision records (0000–0008)
+├── adr/                       # MADR architecture decision records (0000–0010)
 ├── docs/                      # Domain docs (agent-output-contract.md is synced from tests/fixtures)
 ├── AGENTS.md                  # This file
 ├── tools/                     # agent-cli.sh — pinned external-CLI dispatcher (ADR 0008; Write/Edit self-protected)
