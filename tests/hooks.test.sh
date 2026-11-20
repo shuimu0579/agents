@@ -906,7 +906,7 @@ done
 secret_probe="--secret-token-987654"
 secret_err="$(PATH="$CLI_SHIMS:$PATH" FLEET_CLI_PIN_FILE="$CLI_PIN_FILE" bash "$REPO_ROOT/tools/agent-cli.sh" mark "$secret_probe" 2>&1)"
 secret_rc=$?
-if [ "$secret_rc" -eq 2 ] && ! printf '%s' "$secret_err" | grep -qF "$secret_probe"; then
+if [ "$secret_rc" -eq 2 ] && ! printf '%s' "$secret_err" | grep -qF -- "$secret_probe"; then
   PASS=$((PASS + 1)); echo "PASS  wrapper does not echo rejected prompt text to stderr"
 else
   FAIL=$((FAIL + 1)); echo "FAIL  wrapper echoed rejected prompt text (rc=$secret_rc err=$secret_err)"

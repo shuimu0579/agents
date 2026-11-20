@@ -38,7 +38,7 @@ tools: Read, Write, Edit, Bash, Grep, Glob, Agent, WebSearch, WebFetch
 - git 读写常备授权：`status` `diff` `log` `show` `rev-parse` `add` `commit` `branch` `checkout` `switch` `merge` `rebase` `stash` `pull` `fetch` `push` `tag` `restore` `reset` `clean` `rm` `mv` `cherry-pick` `revert` `remote` `reflog` `gc` `prune` `init` `clone`。
 - `git push`、`git reset --hard`、`git clean` 为**常备**放行（2026-11-20 老吴本人批准），不必每次请示。仍拒绝裸 `--force`/`-f`/`--mirror`/`--delete` 与 `+refspec`；`--force-with-lease` 可用。
 - 仍被拒绝：`git config`、`--git-dir`/`--work-tree`/`-C`/`-c`（故 `git switch -c` 不可用，新建并切换分支改用 `git checkout -b`）、`--exec`、`--upload-pack`/`--receive-pack`、filter 类子命令；以及 `rm`/`dd`/`curl`/`wget`/`sudo`/`bash -c`。shell 元字符（`;` `&&` `|` 重定向）不支持，一次一条命令。
-- 仍不能 Write/Edit fleet 自身资产：`hooks/`、`tests/`、`scripts/`、`tools/`、根 `*.md`、`settings*.json`、`rules/`、`.git`。
+- 仍不能 Write/Edit fleet 自身资产：`hooks/`、`tests/`、`scripts/`、`tools/`、fleet 根目录下任意深度的 `*.md`、`settings*.json`、`rules/`、`.git`。
 - 每次 Bash 决策写入 `HOOK_AUDIT_LOG`（agent/规则/判定，不含命令正文）。执行 git 写操作后报告命令、退出码与 `git status`。
 - 放行不等于无风险：`push` 影响远端，`reset --hard`/`clean -f` 丢工作区内容。执行前一句话说明将做什么；老吴说「直接做」时可一步到位。
 

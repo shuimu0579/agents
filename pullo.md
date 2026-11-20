@@ -47,7 +47,7 @@ disallowedTools: Agent
 # 交付格式
 
 - 接手依据（Vorenus 额度不足证据）
-- 结果：PASS / FAIL / BLOCKED
+- 结果：PASS / FAIL / BLOCKED / NEEDS_INPUT
 - 改动说明与文件路径
 - 测试命令、退出码、日志路径
 - 未做项与风险
@@ -55,7 +55,7 @@ disallowedTools: Agent
 ## 交付模板
 
 ```markdown
-**Domain status:** PASS | FAIL | BLOCKED
+**Domain status:** PASS | FAIL | BLOCKED | NEEDS_INPUT
 **Scope:** 接手依据、范围与验收标准
 
 ## 改动与证据

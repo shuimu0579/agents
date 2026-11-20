@@ -6,4 +6,4 @@ octavion|Read, Grep, Glob, Bash, WebSearch, WebFetch|inherit|PLAN_READY;BLOCKED;
 posca|Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch|inherit|PASS;PASS_WITH_RISKS;FAIL|executor
 atia|Read, Grep, Glob, Bash, WebSearch, WebFetch|inherit|ON_TRACK;DEVIATED;BLOCKED;INSUFFICIENT_EVIDENCE|review_cli
 vorenus|Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch|inherit|PASS;FAIL;BLOCKED_QUOTA|executor
-pullo|Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch|inherit|PASS;FAIL;BLOCKED|executor
+pullo|Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch|inherit|PASS;FAIL;BLOCKED;NEEDS_INPUT|executor

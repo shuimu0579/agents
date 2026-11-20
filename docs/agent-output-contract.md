@@ -74,6 +74,7 @@ out of this gate's scope (ADR 0005).
 | pullo | PASS | GO |
 | pullo | FAIL | BLOCK |
 | pullo | BLOCKED | BLOCK |
+| pullo | NEEDS_INPUT | NEEDS_INPUT |
 
 ## Report skeleton (required)
 

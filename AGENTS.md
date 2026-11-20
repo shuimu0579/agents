@@ -112,7 +112,7 @@ agents/
 ├── atia.md                    # Process spot check
 ├── vorenus.md                 # Primary implementation
 ├── pullo.md                   # Fallback implementation
-├── adr/                       # MADR architecture decision records (0000–0013)
+├── adr/                       # MADR architecture decision records (0000–0014)
 ├── docs/                      # Domain docs (agent-output-contract.md is synced from tests/fixtures)
 ├── AGENTS.md                  # This file
 ├── tools/                     # agent-cli.sh — pinned external-CLI dispatcher (ADR 0008; Write/Edit self-protected)
@@ -185,10 +185,10 @@ Column 5 of the contract is one of:
   `tests/*.sh` scripts, and — for mapped executor roles (`posca`, `vorenus`) — their
   own bound `bash /Users/suimu/.claude/agents/tools/agent-cli.sh <role> "<prompt>"`
   route. Everything else is denied with `rule:allowlist`.
-- Write/Edit self-protection covers `hooks/`, `tests/`, `scripts/`, `tools/`, root
-  `*.md`, live Claude/Grok settings, `rules/`, and `.git`, decided by filesystem
-  identity (`st_dev`/`st_ino`) so an alternate spelling of the same file cannot slip
-  past the prefix test. Bash-layer
+- Write/Edit self-protection covers `hooks/`, `tests/`, `scripts/`, `tools/`, any
+  `*.md` under the fleet root at any depth, live Claude/Grok settings, `rules/`,
+  and `.git`, decided by filesystem identity (`st_dev`/`st_ino`) so an alternate
+  spelling of the same file cannot slip past the prefix test. Bash-layer
   self-protection is best-effort: running project code (tests) or an external agentic
   CLI can still write to disk where vendor flags permit it. This is an accepted
   residual, recorded in ADR 0006 and ADR 0008. The hooks are an authorization gate,
