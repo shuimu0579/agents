@@ -62,11 +62,18 @@ code fetched at launch.
 
 ```bash
 command -v jq python3 >/dev/null || echo "MISSING: jq/python3 — gates will fail closed"
-ls -l hooks/*.sh hooks/xixi/*.sh hooks/lib/*.sh | grep -v '^-rwx' && echo "MISSING: executable bit"
+ls -l hooks/*.sh hooks/xixi/*.sh hooks/lib/*.sh tools/*.sh | grep -v '^-rwx' && echo "MISSING: executable bit"
 bash tests/hook-e2e.test.sh          # asserts settings.json registers all four hooks
 bash scripts/sync-codex-mirror.sh --check
+bash tools/pin-clis.sh --check       # CLI route pins match the installed binaries
 bash tests/run_all.sh
 ```
+
+The pin check is deliberately not part of `run_all.sh`: a machine that only uses
+Claude Code and never dispatches to agy/codex/grok has no reason to install them,
+and the check exits 127 when one is missing. Run it when a route is in use, and
+after any CLI upgrade — a stale pin makes the route fail closed rather than trust
+new bytes. `pin-clis.sh` is main-session-only; agents cannot run it.
 
 Registration and dependency presence are the two failure modes the test suites cannot
 catch on their own: an unregistered hook leaves every suite green while constraining
