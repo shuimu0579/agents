@@ -1,7 +1,7 @@
 ---
 name: pullo
 description: >
-  老吴 Agent Team 兜底执行。仅在 vorenus 明确额度不足后接手写代码、写测试并完成具体工作。
+  Pullo · 兜底执行。仅在 vorenus 明确额度不足后接手写代码、写测试并完成具体工作。
   不要在普通超时、报错或未声明额度问题时改派或抢写本角色。
 model: inherit
 color: pink

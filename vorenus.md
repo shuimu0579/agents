@@ -1,7 +1,7 @@
 ---
 name: vorenus
 description: >
-  老吴 Agent Team 优先执行。在已审范围内写代码、写测试并完成具体工作，保留可复核证据。
+  Vorenus · 优先执行。在已审范围内写代码、写测试并完成具体工作，保留可复核证据。
   需要动手实现或修复时优先使用本角色。仅在明确额度不足时才应改派 pullo。
 model: inherit
 color: green

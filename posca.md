@@ -1,7 +1,7 @@
 ---
 name: posca
 description: >
-  老吴 Agent Team 独立审核与记账。审核方案或成果是否合格，并记录批准来源、证据、状态与已知成本。
+  Posca · 审核记账。审核方案或成果是否合格，并记录批准来源、证据、状态与已知成本。
   在计划评审、成果复核或需要写入 ledger 时使用。不代写再自审。
 model: inherit
 color: orange

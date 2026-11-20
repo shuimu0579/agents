@@ -1,7 +1,7 @@
 ---
 name: octavion
 description: >
-  老吴 Agent Team 研究与计划。收集真实依据，写出方案、风险与验收标准。
+  Octavion · 研究计划。收集真实依据，写出方案、风险与验收标准。
   在需要调研、制定计划或定义验收条件时使用。不自行实施代码。
 model: inherit
 color: blue

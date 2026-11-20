@@ -1,7 +1,7 @@
 ---
 name: mark
 description: >
-  老吴 Agent Team 意图校验。对照老吴原话与协调理解/拟计划，检查遗漏、扩大范围或走偏。
+  Mark · 意图校验。对照老吴原话与协调理解/拟计划，检查遗漏、扩大范围或走偏。
   在分派执行前、或怀疑理解不准确时使用。不代替用户确认或批准。
 model: inherit
 color: yellow
