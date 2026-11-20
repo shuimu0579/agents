@@ -5,7 +5,7 @@ description: >
   在分派执行前、或怀疑理解不准确时使用。不代替用户确认或批准。
 model: inherit
 color: yellow
-tools: Read, Grep, Glob
+tools: Read, Grep, Glob, Bash
 disallowedTools: Agent
 ---
 
@@ -71,7 +71,16 @@ disallowedTools: Agent
 
 结果交回主会话或 Anthory，由主会话决定是否调整计划。不要自行联系其他角色或用户渠道。
 
-可选跨 CLI 扩展（**非必需**）：历史协作中曾用 agy 显式 `--model gemini-4-hydrogen-xhigh`。不得写入本文件的 `model` 字段，不得改共享 CLI 默认；未提供该环境时，直接用当前 Claude Code 会话完成本职。
+**默认外部模型（ADR 0008）：`agy --sandbox --disable-slash-commands --model gemini-4-hydrogen-xhigh --print="<prompt>"`。** 需要外部模型判断时，只通过钉死的绝对路径包装脚本调用（`<role>` 必须绑定为 `mark`）：
+
+```bash
+bash /Users/suimu/.claude/agents/tools/agent-cli.sh mark "<要提交给外部模型的问题或上下文>"
+```
+
+- 包装脚本已固定 CLI、模型与非交互参数；**不要**直接调用 agy/codex/grok 或改用 `sh`，也不要跨角色调用其他路由，Bash gate 会以 `rule:allowlist` 拒绝。
+- 除这条包装调用外，本角色没有通用 shell，也不能通过 Claude 工具写文件；传入的 prompt 须为单行纯文本参数（不含 `; & | < > $ ( ) { }`、换行或以 `-` / `/` 开头及保留子命令名），需要外部模型看的上下文请直接整理进该参数。
+- CLI 缺失或未登录时，不要假称已调用；直接用当前 Claude Code 会话完成本职并说明原因。
+- `model` 字段保持 `inherit`：外部模型 ID 只属于分派路由，不属于 agent 定义。
 
 # 共同安全规则
 

@@ -80,10 +80,10 @@ the host stamps one of those identity fields on subagent Write events.
 | Agent | Role | Tools | Model | Flag |
 |-------|------|-------|-------|------|
 | `anthory` | Coordination, planning, summary to the user | Read, Write, Edit, Bash, Grep, Glob, Agent | inherit | orchestrator |
-| `mark` | Intent check against the user's original wording | Read, Grep, Glob | inherit | review_only |
-| `octavion` | Research, plan, risks, acceptance criteria | Read, Grep, Glob | inherit | review_only |
+| `mark` | Intent check against the user's original wording | Read, Grep, Glob, Bash | inherit | review_cli |
+| `octavion` | Research, plan, risks, acceptance criteria | Read, Grep, Glob, Bash | inherit | review_cli |
 | `posca` | Independent review + ledger (approval source, evidence, status, cost) | Read, Write, Edit, Bash, Grep, Glob | inherit | executor |
-| `atia` | Process spot check (on demand) | Read, Grep, Glob | inherit | review_only |
+| `atia` | Process spot check (on demand) | Read, Grep, Glob, Bash | inherit | review_cli |
 | `vorenus` | Primary implementation; writes code and runs tests | Read, Write, Edit, Bash, Grep, Glob | inherit | executor |
 | `pullo` | Fallback implementation, only when Vorenus is explicitly out of quota | Read, Write, Edit, Bash, Grep, Glob | inherit | executor |
 
@@ -105,9 +105,10 @@ agents/
 ├── atia.md                    # Process spot check
 ├── vorenus.md                 # Primary implementation
 ├── pullo.md                   # Fallback implementation
-├── adr/                       # MADR architecture decision records (0000–0006)
+├── adr/                       # MADR architecture decision records (0000–0008)
 ├── docs/                      # Domain docs (agent-output-contract.md is synced from tests/fixtures)
 ├── AGENTS.md                  # This file
+├── tools/                     # agent-cli.sh — pinned external-CLI dispatcher (ADR 0008; Write/Edit self-protected)
 ├── hooks/                     # Agent hooks (approvals, bash gate, write self-protect, xixi sandbox)
 │   ├── lib/                   # Shared libraries: core, fs, security, executor, xixi
 │   ├── approvals/             # One-shot approval files
@@ -145,22 +146,46 @@ single source of truth.
 Column 5 of the contract is one of:
 
 - `review_only` — no `Bash`; Write/Edit/Bash are rejected by guardrails.
+- `review_cli` — review role with a default external model (ADR 0008). `Bash` is
+  declared, but only `bash /Users/suimu/.claude/agents/tools/agent-cli.sh <role> "<prompt>"`
+  (or `bash tools/agent-cli.sh <role> "<prompt>"` when `cwd` is physically the fleet
+  root), with `<role>` bound to the attributed `agent_type`, is admitted; every other
+  command denies with `rule:allowlist`. Write/Edit stay banned.
 - `mutator` — legacy path: Bash only when the tools column declares it. Kept for the
   parser/approval test coverage; no live role uses it.
 - `executor` — Write/Edit plus Bash, with the execution-only allowlist in
-  `hooks/lib/executor.sh` (ADR 0006).
+  `hooks/lib/executor.sh` (ADR 0006) plus the bound `tools/agent-cli.sh <role>` route
+  for mapped executor roles (`posca`, `vorenus`; ADR 0008).
 - `orchestrator` — Write/Edit plus Bash with the executor allowlist, and standing
-  git write authority including `push`/`reset --hard`/`clean` (ADR 0007).
+  git write authority including `push`/`reset --hard`/`clean` (ADR 0007). `anthory`
+  and `pullo` have no external CLI mapping and are denied the wrapper route.
 
 ### Bash policy
 
 - Review-only roles have no Bash; the gate denies them with `rule:review-only`.
-- Executor roles run only the allowlist: read commands, git read-only, test runners,
-  `python3 -m unittest|json.tool`, and this fleet's `tests/*.sh` scripts. Everything
-  else is denied with `rule:allowlist`.
-- Write/Edit self-protection is absolute. Bash-layer self-protection is best-effort:
-  running project code (tests) can still write to disk. This is an accepted residual,
-  recorded in ADR 0006. The hooks are an authorization gate, not a sandbox (ADR 0003).
+- `review_cli` roles (`mark`, `octavion`, `atia`) reach Bash only through
+  `bash /Users/suimu/.claude/agents/tools/agent-cli.sh <role> "<prompt>"` (`bash` only,
+  never `sh`; `<role>` must equal the attributed `agent_type`; symlinks and outside-fleet
+  aliases are rejected). The wrapper resolves `agy`/`codex`/`grok` to a verified
+  physical path outside `${FLEET_ROOT}` and `/tmp`, checks the binary's SHA-256
+  against `tools/cli-sha256` before `exec`, and pins the CLI, model and safety flags
+  (ADR 0008). It refuses option-looking (`-*`), slash-command (`/*`) and blank
+  prompts; a word that happens to name a vendor subcommand is ordinary prompt data.
+  A CLI upgrade fails closed until the pin is refreshed with
+  `bash tools/pin-clis.sh` (verify with `bash tools/pin-clis.sh --check`).
+- Executor roles (`posca`, `vorenus`, `pullo`) run only the allowlist: read commands,
+  git read-only, test runners, `python3 -m unittest|json.tool`, this fleet's
+  `tests/*.sh` scripts, and — for mapped executor roles (`posca`, `vorenus`) — their
+  own bound `bash /Users/suimu/.claude/agents/tools/agent-cli.sh <role> "<prompt>"`
+  route. Everything else is denied with `rule:allowlist`.
+- Write/Edit self-protection covers `hooks/`, `tests/`, `scripts/`, `tools/`, root
+  `*.md`, live Claude/Grok settings, `rules/`, and `.git`, decided by filesystem
+  identity (`st_dev`/`st_ino`) so an alternate spelling of the same file cannot slip
+  past the prefix test. Bash-layer
+  self-protection is best-effort: running project code (tests) or an external agentic
+  CLI can still write to disk where vendor flags permit it. This is an accepted
+  residual, recorded in ADR 0006 and ADR 0008. The hooks are an authorization gate,
+  not a sandbox (ADR 0003).
 
 ### Body Invariants
 
@@ -242,7 +267,7 @@ bash tests/hook-e2e.test.sh
 
 1. Create `<name>.md` with valid frontmatter (`name`, `description`, `tools`, `model`).
 2. Add the matching row to `tests/fixtures/agent-contract.tsv` — including the flag
-   (`review_only`, `executor`, or `orchestrator`; `mutator` is legacy-only). Guardrails and the Bash hook
+   (`review_only`, `review_cli`, `executor`, or `orchestrator`; `mutator` is legacy-only). Guardrails and the Bash hook
    share this file.
 3. Add a row to the agent directory in `~/.claude/rules/agents.md`.
 4. Run `bash tests/guardrails.sh --strict` and `bash tests/run_all.sh` — all must pass.

@@ -71,7 +71,7 @@ disallowedTools: Agent
 
 证据须可被 Posca 独立复跑。仓库约束与 Vorenus 相同。
 
-可选说明（**非必需，且不得当作本 agent 的模型配置**）：在原团队中，本角色曾使用当时环境已有的 Claude Code 正式配置工作。迁移到本自定义 subagent 后，默认跟随当前会话模型（`inherit`）。不要把外部或历史模型 ID 写入本文件的 `model` 字段，也不要声称会自动切换模型。
+默认外部模型：无。本角色与 Anthory 一样运行在 Claude Code 会话模型上；`model` 字段保持 `inherit`，不要写入外部或历史模型 ID，也不要声称会自动切换模型。需要外部 CLI 时由其他角色按各自默认路由（ADR 0008）调用。
 
 # 共同安全规则
 

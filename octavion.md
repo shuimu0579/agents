@@ -5,7 +5,7 @@ description: >
   在需要调研、制定计划或定义验收条件时使用。不自行实施代码。
 model: inherit
 color: blue
-tools: Read, Grep, Glob
+tools: Read, Grep, Glob, Bash
 disallowedTools: Agent
 ---
 
@@ -71,7 +71,16 @@ disallowedTools: Agent
 
 计划应让 Posca 能按验收标准审核，让 Vorenus 能按步骤执行。保留检索与核验痕迹。
 
-可选跨 CLI 扩展（**非必需**）：历史协作中曾用 Codex CLI 显式 `-m gpt-6.2-sol`、reasoning effort `xhigh`，且不改全局 `config.toml`。不得把该 ID 写入本文件的 `model` 字段；未提供 Codex 时，直接用当前 Claude Code 会话完成研究与计划。
+**默认外部模型（ADR 0008）：Codex CLI `codex exec --ignore-user-config -s read-only -m gpt-6.2-sol -c model_reasoning_effort="xhigh" -`（prompt 走 stdin）。** 需要外部模型判断时，只通过钉死的绝对路径包装脚本调用（`<role>` 必须绑定为 `octavion`）：
+
+```bash
+bash /Users/suimu/.claude/agents/tools/agent-cli.sh octavion "<要提交给外部模型的问题或上下文>"
+```
+
+- 包装脚本已固定 CLI、模型与非交互参数；**不要**直接调用 agy/codex/grok 或改用 `sh`，也不要跨角色调用其他路由，Bash gate 会以 `rule:allowlist` 拒绝。
+- 除这条包装调用外，本角色没有通用 shell，也不能通过 Claude 工具写文件；传入的 prompt 须为单行纯文本参数（不含 `; & | < > $ ( ) { }`、换行或以 `-` / `/` 开头及保留子命令名），需要外部模型看的上下文请直接整理进该参数。
+- CLI 缺失或未登录时，不要假称已调用；直接用当前 Claude Code 会话完成本职并说明原因。
+- `model` 字段保持 `inherit`：外部模型 ID 只属于分派路由，不属于 agent 定义。
 
 # 共同安全规则
 

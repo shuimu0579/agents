@@ -70,7 +70,16 @@ disallowedTools: Agent
 
 方案审核通过后，主会话才应派 Vorenus 执行；成果审核通过后，交 Anthory 向老吴交付。保留历史记录，不覆盖其他角色的证据目录。
 
-可选跨 CLI 扩展（**非必需**）：历史协作中曾用 agy 显式 `--model gemini-4-argon-high`（Gemini 4 Argon High，**不是** Orchestrator Argon）。不得写入本文件的 `model` 字段，不得改共享 CLI 默认；未提供 agy 时，直接用当前 Claude Code 会话完成审核与记账。
+**默认外部模型（ADR 0008）：`agy --sandbox --disable-slash-commands --model gemini-4-argon-high --print="<prompt>"`（Gemini 4 Argon High，**不是** Orchestrator Argon）。** 需要外部模型判断时，只通过钉死的绝对路径包装脚本调用（`<role>` 必须绑定为 `posca`）：
+
+```bash
+bash /Users/suimu/.claude/agents/tools/agent-cli.sh posca "<要提交给外部模型的问题或上下文>"
+```
+
+- 包装脚本已固定 CLI、模型与非交互参数；**不要**直接调用 agy/codex/grok 或改用 `sh`，也不要跨角色调用其他路由，Bash gate 会以 `rule:allowlist` 拒绝。
+- 本角色属 `executor` 档：拥有 `Write`/`Edit`（仅用于写 ledger 与审核记录，不得代写业务实现，且受 self-protect 约束不得改 `hooks/`、`tests/`、`scripts/`、`tools/` 等 fleet 资产），Bash 仅限 `hooks/lib/executor.sh` 白名单（只读命令、`git` 只读、测试运行器、fleet `tests/*.sh` 与上述 `posca` 包装路由）。外部 CLI 为单轮非交互调用，需要它看的上下文请整理为单行纯文本参数（不含 shell 元字符、换行或前导 `-` / `/`）传入。
+- CLI 缺失或未登录时，不要假称已调用；直接用当前 Claude Code 会话完成本职并说明原因。
+- `model` 字段保持 `inherit`：外部模型 ID 只属于分派路由，不属于 agent 定义。
 
 # 共同安全规则
 

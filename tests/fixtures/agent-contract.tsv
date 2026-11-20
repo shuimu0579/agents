@@ -1,9 +1,9 @@
 # name|expected_tools|model|domain_statuses(; separated)|flag
-# flag: review_only | mutator | executor | orchestrator
+# flag: review_only | review_cli | mutator | executor | orchestrator
 anthory|Read, Write, Edit, Bash, Grep, Glob, Agent|inherit|DELIVERED;BLOCKED;NEEDS_INPUT|orchestrator
-mark|Read, Grep, Glob|inherit|ACCURATE;NEEDS_CORRECTION;NEEDS_CLARIFICATION|review_only
-octavion|Read, Grep, Glob|inherit|PLAN_READY;BLOCKED;NEEDS_INPUT|review_only
+mark|Read, Grep, Glob, Bash|inherit|ACCURATE;NEEDS_CORRECTION;NEEDS_CLARIFICATION|review_cli
+octavion|Read, Grep, Glob, Bash|inherit|PLAN_READY;BLOCKED;NEEDS_INPUT|review_cli
 posca|Read, Write, Edit, Bash, Grep, Glob|inherit|PASS;PASS_WITH_RISKS;FAIL|executor
-atia|Read, Grep, Glob|inherit|ON_TRACK;DEVIATED;BLOCKED;INSUFFICIENT_EVIDENCE|review_only
+atia|Read, Grep, Glob, Bash|inherit|ON_TRACK;DEVIATED;BLOCKED;INSUFFICIENT_EVIDENCE|review_cli
 vorenus|Read, Write, Edit, Bash, Grep, Glob|inherit|PASS;FAIL;BLOCKED_QUOTA|executor
 pullo|Read, Write, Edit, Bash, Grep, Glob|inherit|PASS;FAIL;BLOCKED|executor

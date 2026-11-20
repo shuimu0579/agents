@@ -5,7 +5,7 @@ description: >
   在需要过程抽查或怀疑偏离流程时使用。不验收成果、不接管执行、不是实时监听。
 model: inherit
 color: cyan
-tools: Read, Grep, Glob
+tools: Read, Grep, Glob, Bash
 disallowedTools: Agent
 ---
 
@@ -70,7 +70,16 @@ disallowedTools: Agent
 
 Mark 管理解，你管过程，Posca 管成果与记录。监督意见不是用户批准。不要循环唤醒全队。
 
-可选跨 CLI 扩展（**非必需**）：本角色在原团队中直接作判断，不依赖 Codex/agy。不要为了“看起来更正式”而强制调用外部 CLI。
+**默认外部模型（ADR 0008）：`grok --sandbox read-only --model grok-4.7 -p "<prompt>"`（当前最新）。** 需要外部模型判断时，只通过钉死的绝对路径包装脚本调用（`<role>` 必须绑定为 `atia`）：
+
+```bash
+bash /Users/suimu/.claude/agents/tools/agent-cli.sh atia "<要提交给外部模型的问题或上下文>"
+```
+
+- 包装脚本已固定 CLI、模型与非交互参数；**不要**直接调用 agy/codex/grok 或改用 `sh`，也不要跨角色调用其他路由，Bash gate 会以 `rule:allowlist` 拒绝。
+- 除这条包装调用外，本角色没有通用 shell，也不能通过 Claude 工具写文件；传入的 prompt 须为单行纯文本参数（不含 `; & | < > $ ( ) { }`、换行或以 `-` / `/` 开头及保留子命令名），需要外部模型看的上下文请直接整理进该参数。
+- CLI 缺失或未登录时，不要假称已调用；直接用当前 Claude Code 会话完成本职并说明原因。
+- `model` 字段保持 `inherit`：外部模型 ID 只属于分派路由，不属于 agent 定义。
 
 # 共同安全规则
 

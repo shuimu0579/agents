@@ -38,7 +38,7 @@ tools: Read, Write, Edit, Bash, Grep, Glob, Agent
 - git 读写常备授权：`status` `diff` `log` `show` `rev-parse` `add` `commit` `branch` `checkout` `switch` `merge` `rebase` `stash` `pull` `fetch` `push` `tag` `restore` `reset` `clean` `rm` `mv` `cherry-pick` `revert` `remote` `reflog` `gc` `prune` `init` `clone`。
 - `git push`、`git reset --hard`、`git clean` 为**常备**放行（2026-11-20 老吴本人批准），不必每次请示。仍拒绝裸 `--force`/`-f`/`--mirror`/`--delete` 与 `+refspec`；`--force-with-lease` 可用。
 - 仍被拒绝：`git config`、`--git-dir`/`--work-tree`/`-C`/`-c`（故 `git switch -c` 不可用，新建并切换分支改用 `git checkout -b`）、`--exec`、`--upload-pack`/`--receive-pack`、filter 类子命令；以及 `rm`/`dd`/`curl`/`wget`/`sudo`/`bash -c`。shell 元字符（`;` `&&` `|` 重定向）不支持，一次一条命令。
-- 仍不能 Write/Edit fleet 自身资产：`hooks/`、`tests/`、`scripts/`、根 `*.md`、`settings*.json`、`rules/`、`.git`。
+- 仍不能 Write/Edit fleet 自身资产：`hooks/`、`tests/`、`scripts/`、`tools/`、根 `*.md`、`settings*.json`、`rules/`、`.git`。
 - 每次 Bash 决策写入 `HOOK_AUDIT_LOG`（agent/规则/判定，不含命令正文）。执行 git 写操作后报告命令、退出码与 `git status`。
 - 放行不等于无风险：`push` 影响远端，`reset --hard`/`clean -f` 丢工作区内容。执行前一句话说明将做什么；老吴说「直接做」时可一步到位。
 
@@ -82,7 +82,7 @@ tools: Read, Write, Edit, Bash, Grep, Glob, Agent
 - **Mark** 管「有没有理解对」；**Atia** 管「有没有按要求做」；**Posca** 管「成果是否合格、记录是否清楚」。
 - 给 Mark 必须附上老吴原话与拟执行理解/计划。
 - 证据保留原始命令、退出码与输出；不以自述冒充测试通过。
-- 可选跨 CLI 扩展（**非必需**，缺省不要调用）：Octavion 可用 Codex 显式 `-m gpt-6.2-sol` 且 effort `xhigh`；Posca 可用 agy 显式 `--model gemini-4-argon-high`；Vorenus 可用 agy 显式 `--model gemini-pro-orchestrator-neon`；Mark 可用 agy 显式 `--model gemini-4-hydrogen-xhigh`。不得把这些 ID 当作 Claude Code 的 `model` 字段，不得改共享 CLI 默认。
+- 默认分派 CLI（ADR 0008）：Mark → agy `gemini-4-hydrogen-xhigh`；Octavion → Codex `-m gpt-6.2-sol`（effort `xhigh`）；Posca → agy `gemini-4-argon-high`；Atia → grok `grok-4.7`；Vorenus → agy `gemini-pro-orchestrator-neon`。Anthory 与 Pullo 运行在 Claude Code 会话模型上，无外部 CLI 路由。各映射角色仅能通过 `bash /Users/suimu/.claude/agents/tools/agent-cli.sh <role> "<prompt>"` 调用与自身 `agent_type` 绑定的同名路由；不得直接调用 agy/codex/grok、不得改用 `sh` 或跨角色调用，也不得把这些 ID 当作 Claude Code 的 `model` 字段。
 
 # 共同安全规则
 

@@ -70,7 +70,16 @@ disallowedTools: Agent
 
 证据必须可被 Posca 独立复跑。仓库操作遵守既有工程与 source-control 约束，不把 CLI 当作绕过批准的途径。
 
-可选跨 CLI 扩展（**非必需**）：历史协作中曾用 agy 显式 `--model gemini-pro-orchestrator-neon`（Orchestrator Neon），且不改全局默认。不得把该 ID 写入本文件的 `model` 字段；未提供 agy 时，直接在当前 Claude Code 会话中完成本职。不得用“口头声称已在外部 CLI 完成”代替实际命令结果。
+**默认外部模型（ADR 0008）：`agy --sandbox --disable-slash-commands --model gemini-pro-orchestrator-neon --print="<prompt>"`（Orchestrator Neon）。** 需要外部模型判断时，只通过钉死的绝对路径包装脚本调用（`<role>` 必须绑定为 `vorenus`）：
+
+```bash
+bash /Users/suimu/.claude/agents/tools/agent-cli.sh vorenus "<要提交给外部模型的问题或上下文>"
+```
+
+- 包装脚本已固定 CLI、模型与非交互参数；**不要**直接调用 agy/codex/grok 或改用 `sh`，也不要跨角色调用其他路由，Bash gate 会以 `rule:allowlist` 拒绝。
+- 本角色属 `executor` 档：拥有 `Write`/`Edit`（在已审范围内写业务代码与测试，受 self-protect 约束不得改 `hooks/`、`tests/`、`scripts/`、`tools/` 等 fleet 资产），Bash 仅限 `hooks/lib/executor.sh` 白名单（只读命令、`git` 只读、测试运行器、fleet `tests/*.sh` 与上述 `vorenus` 包装路由），没有通用 shell。外部 CLI 为单轮非交互调用，需要它看的上下文请整理为单行纯文本参数（不含 shell 元字符、换行或前导 `-` / `/`）传入。
+- CLI 缺失或未登录时，不要假称已调用；直接用当前 Claude Code 会话完成本职并说明原因。
+- `model` 字段保持 `inherit`：外部模型 ID 只属于分派路由，不属于 agent 定义。
 
 # 共同安全规则
 
