@@ -112,7 +112,7 @@ agents/
 ├── atia.md                    # Process spot check
 ├── vorenus.md                 # Primary implementation
 ├── pullo.md                   # Fallback implementation
-├── adr/                       # MADR architecture decision records (0000–0010)
+├── adr/                       # MADR architecture decision records (0000–0012)
 ├── docs/                      # Domain docs (agent-output-contract.md is synced from tests/fixtures)
 ├── AGENTS.md                  # This file
 ├── tools/                     # agent-cli.sh — pinned external-CLI dispatcher (ADR 0008; Write/Edit self-protected)
@@ -217,9 +217,11 @@ not treat "it ran under the hook" as a sandbox.
 
 ### `_xixi` Write boundary (historical)
 
-`_xixi` is not part of the 7-role roster. Its hooks remain registered and inert for any
-other identity: `_xixi` may Write **only** to `/tmp/xixi-prompt-<8-alnum-id>`, enforced
-by PreToolUse `hooks/xixi/restrict-write.sh`, with PostToolUse
+`_xixi` is not part of the 7-role roster. Its hooks are registered in Claude Code
+(`~/.claude/settings.json`) and inert for any other identity; on this machine Grok
+registers none (`~/.grok/hooks/agent-gates.json` is absent and `~/.grok/config.toml`
+sets `hooks = false`). Where those hooks run, `_xixi` may Write **only** to
+`/tmp/xixi-prompt-<8-alnum-id>`, enforced by PreToolUse `hooks/xixi/restrict-write.sh`, with PostToolUse
 `hooks/xixi/copy-on-write.sh` copying to the clipboard. The general "sandbox mutator"
 property is now covered by the contract `mutator` flag plus the synthetic
 `probe-mutator` row in `tests/hooks.test.sh`. See `hooks/xixi/CONTRACT.md`.
@@ -234,7 +236,7 @@ agent believed it could still run Playwright days after `Bash` had been removed.
 
 ```bash
 bash scripts/sync-codex-mirror.sh          # regenerate stale mirrors from the .md sources
-bash scripts/sync-codex-mirror.sh --check  # exit 1 if any mirror is older than its source
+bash scripts/sync-codex-mirror.sh --check  # exit 1 if any mirror is stale OR orphaned
 ```
 
 Every generated mirror starts with a Codex runtime note: Claude Code hooks are not installed in Codex, so gate and clipboard behaviour described in a definition is instruction-only there.
@@ -244,11 +246,12 @@ preflight; it is deliberately not part of `run_all.sh`, because a missing `~/.co
 directory is normal on a machine that only uses Claude Code and must not fail the
 suite. Verify other changes with the commands under Testing & CI.
 
-**Orphan mirrors.** `~/.codex/agents/` still contains the six legacy TOMLs
-(`architect`, `code-reviewer`, `security-reviewer`, `e2e-runner`, `_xixi`,
-`_critical_thinking`). The sync script regenerates mirrors for current definitions but
-does **not** delete orphan files, so those six remain loadable by Codex. Removing them
-requires explicit authorization; this repository does not do it automatically.
+**Orphan mirrors.** `~/.codex/agents/` currently holds exactly the seven current
+mirrors; the legacy TOMLs the fleet retired have been pruned. The sync script prunes as
+well as regenerates: any `*.toml` with no contract row is deleted with `rm -f` on a
+normal run (reported as `pruned <name>`), and `--check` reports it as `ORPHAN` and
+exits 1. A mirror left behind by a future rename is therefore removed by the next sync,
+not left loadable.
 
 ## Testing & CI
 
@@ -291,12 +294,14 @@ bash tests/hook-e2e.test.sh
 
 ### Issue tracker
 
-GitHub issues tracked via `gh` CLI (`shuimu0579/agents`). See `docs/agents/issue-tracker.md`.
+GitHub issues tracked via `gh` CLI (`shuimu0579/agents`). No separate doc file exists;
+this section is the contract.
 
 ### Triage labels
 
-Five canonical roles mapped 1:1 (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+Five canonical roles mapped 1:1 (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). No separate doc file exists; this list is the contract.
 
 ### Domain docs
 
-Single-context repository layout (`CONTEXT.md` + `adr/`). See `docs/agents/domain.md`.
+Single-context repository layout: MADR ADRs live in `adr/` at the repository root
+(ADR 0000). There is no `CONTEXT.md`; `docs/` holds only `agent-output-contract.md`.
