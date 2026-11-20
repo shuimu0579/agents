@@ -2,11 +2,10 @@
 
 > **Historical compatibility surface.** The `_xixi` role is retired: there is no
 > `_xixi.md` in the fleet. The hooks are registered in Claude Code
-> (`~/.claude/settings.json`) and are inert for every other identity. On this machine
-> Grok registers none: `~/.grok/hooks/agent-gates.json` is absent and
-> `~/.grok/config.toml` sets `hooks = false`. This file documents the hook interface
-> those hooks still implement; it is not a live agent contract. If you change a hook's
-> status strings or paths, update this file.
+> (`~/.claude/settings.json`) and in Grok (`~/.grok/hooks/agent-gates.json`), and are
+> inert for every other identity. This file documents the hook interface those hooks
+> still implement; it is not a live agent contract. If you change a hook's status
+> strings or paths, update this file.
 
 ## Components
 
@@ -26,13 +25,13 @@ green suite does not prove the host is enforcing it.
 | Host | Loaded config | Notes |
 |------|---------------|-------|
 | Claude Code | `~/.claude/settings.json` | Hand-registered 2026-10-20, after the Otty and prefer.py groups. Timeouts set 2026-10-21. PreToolUse `Bash` → `restrict-bash-by-agent.sh` (timeout 5); PreToolUse `Write|Edit` → `restrict-mutator-write.sh` (timeout 5); PreToolUse `Write` → `xixi/restrict-write.sh` (timeout 5); PostToolUse `Write` → `xixi/copy-on-write.sh` (timeout 15). Each command is one unquoted `~/.claude/agents/hooks/...` word. Claude matchers stay `Write` / `Write\|Edit`; Grok's native `write` alias is only in `agent-gates.json`. |
-| Grok | `~/.grok/hooks/agent-gates.json` | **Not present on this machine (2026-11-20): `~/.grok/hooks/` is empty and `~/.grok/config.toml` sets `hooks = false`, so Grok registers none.** When the file is present: `compat.claude.hooks` is off, so Claude settings hooks do not run. Matcher must include the native tool name `write` (`Write` aliases to `search_replace` only). The two xixi commands use the same timeouts: restrict-write 5, copy-on-write 15. |
+| Grok | `~/.grok/hooks/agent-gates.json` | **Present (2026-11-20).** `compat.claude.hooks` is off, so the Claude settings hooks stay skipped; Grok loads this native file instead. Matchers: `Bash` (the Claude-style alias for Grok's shell tool), `Write\|Edit\|write`, and `Write\|write` on PreToolUse, plus `Write\|write` on PostToolUse. The native `write` is spelled out because `Write` aliases to `search_replace` only. Timeouts: 5 on the three PreToolUse gates, 15 on copy-on-write. The three PreToolUse handlers set `failClosed: true`; PostToolUse does not, because it cannot block. |
 
 There is no `hooks.json` hook mirror in this fleet: `hooks/xixi/hooks.json` and
 `~/.claude/hooks.json` are both absent. Registration lives only in the host config
 files named above.
 
-Reviewed 2026-10-21 against the live files, after a Codex `gpt-6-astra` run that hit its 900s deadline with an empty final answer (job `audit-mvgiadmw-r5fby6`). Later the same day the four fleet commands got the timeouts in the table above. The same day's follow-up requires `discard_xixi_temp` to parse exactly one JSON object, accept only an unambiguous top-level `_xixi` or `xixi`, and remove the file only when the single tool path (`file_path` or `path`) is `/tmp/xixi-prompt-<8 alnum>`. An unparsed payload warns and leaves the file. None of the four commands set `onFailure`. Official Claude hooks docs require v2.1.295 or later for `onFailure: "block"`; this machine's `claude --version` is 2.1.285, and without that field a timeout or a hook that cannot start lets the tool call continue. Grok's hook reference has no `onFailure` field; a timeout or crash fails open. `tests/hooks.test.sh` and `tests/hook-e2e.test.sh` require timeout 5 on the Bash and `Write|Edit` commands. `tests/xixi-hooks.test.sh` requires timeout 5 and 15 on the two xixi commands, including `agent-gates.json` when that file exists. None of these suites start Claude Code or Grok. A green suite still does not prove either host spawned the hook.
+Reviewed 2026-10-21 against the live files, after a Codex `gpt-6-astra` run that hit its 900s deadline with an empty final answer (job `audit-mvgiadmw-r5fby6`). Later the same day the four fleet commands got the timeouts in the table above. The same day's follow-up requires `discard_xixi_temp` to parse exactly one JSON object, accept only an unambiguous top-level `_xixi` or `xixi`, and remove the file only when the single tool path (`file_path` or `path`) is `/tmp/xixi-prompt-<8 alnum>`. An unparsed payload warns and leaves the file. None of the four commands set `onFailure`. Official Claude hooks docs require v2.1.295 or later for `onFailure: "block"`; this machine's `claude --version` is 2.1.285, and without that field a timeout or a hook that cannot start lets the tool call continue. Grok reads both `failClosed` and Claude's `onFailure`. The three PreToolUse handlers set `failClosed: true`, so a timeout, crash or unreadable reply denies the call; the PostToolUse handler does not set it, so a failure there is only recorded (it cannot block anyway). `tests/hooks.test.sh` and `tests/hook-e2e.test.sh` require timeout 5 on the Bash and `Write|Edit` commands. `tests/xixi-hooks.test.sh` requires timeout 5 and 15 on the two xixi commands, including `agent-gates.json` when that file exists. None of these suites start Claude Code or Grok. A green suite still does not prove either host spawned the hook.
 
 ## PreToolUse gate — `restrict-write.sh`
 

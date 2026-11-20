@@ -112,7 +112,7 @@ agents/
 ├── atia.md                    # Process spot check
 ├── vorenus.md                 # Primary implementation
 ├── pullo.md                   # Fallback implementation
-├── adr/                       # MADR architecture decision records (0000–0012)
+├── adr/                       # MADR architecture decision records (0000–0013)
 ├── docs/                      # Domain docs (agent-output-contract.md is synced from tests/fixtures)
 ├── AGENTS.md                  # This file
 ├── tools/                     # agent-cli.sh — pinned external-CLI dispatcher (ADR 0008; Write/Edit self-protected)
@@ -218,9 +218,8 @@ not treat "it ran under the hook" as a sandbox.
 ### `_xixi` Write boundary (historical)
 
 `_xixi` is not part of the 7-role roster. Its hooks are registered in Claude Code
-(`~/.claude/settings.json`) and inert for any other identity; on this machine Grok
-registers none (`~/.grok/hooks/agent-gates.json` is absent and `~/.grok/config.toml`
-sets `hooks = false`). Where those hooks run, `_xixi` may Write **only** to
+(`~/.claude/settings.json`) and in Grok (`~/.grok/hooks/agent-gates.json`), and inert
+for any other identity. Where those hooks run, `_xixi` may Write **only** to
 `/tmp/xixi-prompt-<8-alnum-id>`, enforced by PreToolUse `hooks/xixi/restrict-write.sh`, with PostToolUse
 `hooks/xixi/copy-on-write.sh` copying to the clipboard. The general "sandbox mutator"
 property is now covered by the contract `mutator` flag plus the synthetic
@@ -256,8 +255,9 @@ not left loadable.
 ## Testing & CI
 
 ```bash
-# Run all nine suites at once (Guardrails strict + Bash hooks + Xixi hooks + Hook E2E
-# + P1 bypass + P3 lib hardening + contract-gate meta + approval binding + gate scope)
+# Run all ten suites at once (Guardrails strict + Bash hooks + Xixi hooks + Grok
+# registration + Hook E2E + P1 bypass + P3 lib hardening + contract-gate meta
+# + approval binding + gate scope)
 bash tests/run_all.sh
 
 # Full contract gate (frontmatter, tools, verdict tokens, line budget, fleet integrity)
@@ -268,6 +268,9 @@ bash tests/hooks.test.sh
 
 # _xixi Write sandbox and clipboard delivery hooks
 bash tests/xixi-hooks.test.sh
+
+# Grok hook registration: four gates, matchers, timeouts, failClosed
+bash tests/grok-hooks-registration.test.sh
 
 # Hook E2E registration & mock execution
 bash tests/hook-e2e.test.sh
