@@ -268,9 +268,9 @@ fi
 if ! sec_cmd_tokenize "$cmd"; then
   block "[bash-hook] BLOCKED: empty, ambiguous, or unsupported shell command (rule:no-shell-meta)." "no-shell-meta"
 fi
-# Executor roles invoking their own bound external-CLI wrapper route use the
-# same wrapper validation rule as review_cli, before sec_cmd_is_network_or_escape
-# scans prompt text for words like `curl` (audit #11).
+# Executor and orchestrator roles invoking their own bound external-CLI wrapper
+# route use the same wrapper validation rule as review_cli, before
+# sec_cmd_is_network_or_escape scans prompt text for words like `curl` (audit #11).
 if [[ "$EXECUTOR" -eq 1 || "$ORCHESTRATOR" -eq 1 ]] &&
    [[ "${SEC_ARGV[0]:-}" == "bash" && ${#SEC_ARGV[@]} -ge 4 ]] &&
    declare -F exec_is_agent_cli >/dev/null 2>&1 &&

@@ -759,17 +759,18 @@ for a in vorenus pullo posca anthory; do
 done
 
 # Executor and orchestrator roles reach the same wrapper through the allowlist,
-# bound to their own attributed agent_type. anthory and pullo have no CLI mapping.
-for a in vorenus posca; do
-  xt "live: $a (executor) pinned CLI wrapper allowed" "$a" "bash $REPO_ROOT/tools/agent-cli.sh $a hello" 0 ""
-  xt "live: $a (executor) sh rejected for CLI wrapper" "$a" "sh $REPO_ROOT/tools/agent-cli.sh $a hello" 2 "rule:allowlist"
+# bound to their own attributed agent_type. pullo has no CLI mapping.
+for a in vorenus posca anthory; do
+  xt "live: $a (write role) pinned CLI wrapper allowed" "$a" "bash $REPO_ROOT/tools/agent-cli.sh $a hello" 0 ""
+  xt "live: $a (write role) sh rejected for CLI wrapper" "$a" "sh $REPO_ROOT/tools/agent-cli.sh $a hello" 2 "rule:allowlist"
 done
 xt "live: vorenus cross-role posca route denied" "vorenus" "bash $REPO_ROOT/tools/agent-cli.sh posca hello" 2 "rule:allowlist"
 xt "live: posca cross-role mark route denied" "posca" "bash $REPO_ROOT/tools/agent-cli.sh mark hello" 2 "rule:allowlist"
 xt "live: pullo cross-role mark route denied" "pullo" "bash $REPO_ROOT/tools/agent-cli.sh mark hello" 2 "rule:allowlist"
 xt "live: pullo unmapped own route denied" "pullo" "bash $REPO_ROOT/tools/agent-cli.sh pullo hello" 2 "rule:allowlist"
 xt "live: anthory cross-role mark route denied" "anthory" "bash $REPO_ROOT/tools/agent-cli.sh mark hello" 2 "rule:allowlist"
-xt "live: anthory unmapped own route denied" "anthory" "bash $REPO_ROOT/tools/agent-cli.sh anthory hello" 2 "rule:allowlist"
+xt "live: anthory cross-role posca route denied" "anthory" "bash $REPO_ROOT/tools/agent-cli.sh posca hello" 2 "rule:allowlist"
+xt "live: anthory own route allowed" "anthory" "bash $REPO_ROOT/tools/agent-cli.sh anthory hello" 0 ""
 for a in vorenus posca anthory; do
   xt "live: $a (write role) unmapped CLI role denied" "$a" "bash $REPO_ROOT/tools/agent-cli.sh nobody hello" 2 "rule:allowlist"
 done
@@ -863,6 +864,9 @@ $'bin=agy\narg[0]=--sandbox\narg[1]=--disable-slash-commands\narg[2]=--model\nar
 
 assert_cli_dispatch "wrapper argv: vorenus -> agy gemini-pro-orchestrator-neon" "vorenus" "implement fix" \
 $'bin=agy\narg[0]=--sandbox\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-pro-orchestrator-neon\narg[4]=--print=implement fix'
+
+assert_cli_dispatch "wrapper argv: anthory -> agy gemini-pro-orchestrator-neon" "anthory" "coordinate plan" \
+$'bin=agy\narg[0]=--sandbox\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-pro-orchestrator-neon\narg[4]=--print=coordinate plan'
 
 assert_cli_dispatch "wrapper argv: octavion -> codex gpt-6.2-sol stdin channel" "octavion" "plan architecture" \
 $'bin=codex\narg[0]=exec\narg[1]=--ignore-user-config\narg[2]=-s\narg[3]=workspace-write\narg[4]=-m\narg[5]=gpt-6.2-sol\narg[6]=-c\narg[7]=model_reasoning_effort=xhigh\narg[8]=-\nstdin=plan architecture'

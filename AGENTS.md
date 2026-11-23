@@ -112,7 +112,7 @@ agents/
 ├── atia.md                    # Process spot check
 ├── vorenus.md                 # Primary implementation
 ├── pullo.md                   # Fallback implementation
-├── adr/                       # MADR architecture decision records (0000–0014)
+├── adr/                       # MADR architecture decision records (0000–0015)
 ├── docs/                      # Domain docs (agent-output-contract.md is synced from tests/fixtures)
 ├── AGENTS.md                  # This file
 ├── tools/                     # agent-cli.sh — pinned external-CLI dispatcher (ADR 0008; Write/Edit self-protected)
@@ -165,7 +165,8 @@ Column 5 of the contract is one of:
   for mapped executor roles (`posca`, `vorenus`; ADR 0008).
 - `orchestrator` — Write/Edit plus Bash with the executor allowlist, and standing
   git write authority including `push`/`reset --hard`/`clean` (ADR 0007). `anthory`
-  and `pullo` have no external CLI mapping and are denied the wrapper route.
+  has its own bound `tools/agent-cli.sh anthory` route to agy Orchestrator (Neon)
+  (ADR 0015); `pullo` has no external CLI mapping and is denied the wrapper route.
 
 ### Bash policy
 

@@ -337,6 +337,7 @@ exec_agent_cli_route() {
     mark)     printf 'agy|gemini-4-hydrogen-xhigh\n' ;;
     posca)    printf 'agy|gemini-4-argon-high\n' ;;
     vorenus)  printf 'agy|gemini-pro-orchestrator-neon\n' ;;
+    anthory)  printf 'agy|gemini-pro-orchestrator-neon\n' ;;
     octavion) printf 'codex|gpt-6.2-sol\n' ;;
     atia)     printf 'grok|grok-4.7\n' ;;
     *)        return 1 ;;
@@ -344,7 +345,7 @@ exec_agent_cli_route() {
 }
 
 exec_agent_cli_roles() {
-  printf 'mark octavion posca atia vorenus'
+  printf 'mark octavion posca atia vorenus anthory'
 }
 
 exec_agent_cli_role_allowed() {
