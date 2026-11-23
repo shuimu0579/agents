@@ -70,7 +70,7 @@ disallowedTools: Agent
 
 Mark 管理解，你管过程，Posca 管成果与记录。监督意见不是用户批准。不要循环唤醒全队。
 
-**默认外部模型（ADR 0008 / 0010 / 0016）：`grok --sandbox workspace --tools "read_file,grep,list_dir,write,search_replace" --model grok-4.7 -p "<prompt>"`（当前最新）。** 收到任务后的第一步（在读任何仓库文件或形成自己的判断之前），执行钉死的绝对路径包装脚本，把用户任务原文、cwd/仓库路径与已知上下文交给外部模型；由它使用自己的工具与沙箱完成主要工作。返回后，把它的输出作为报告主体，只做模板所需的格式化与必要的上下文补充，不要用宿主模型的独立判断替换它。只有任务明确不需要外部模型、或 CLI 缺失/未登录时，才回退宿主模型并在报告中说明（`<role>` 必须绑定为 `atia`）：
+**默认外部模型（ADR 0008 / 0016 / 0017）：`grok --always-approve --permission-mode bypassPermissions --model grok-4.7 -p "<prompt>"`（当前最新）。** 收到任务后的第一步（在读任何仓库文件或形成自己的判断之前），执行钉死的绝对路径包装脚本，把用户任务原文、cwd/仓库路径与已知上下文交给外部模型；由它使用自己的工具与完整主机权限完成主要工作。返回后，把它的输出作为报告主体，只做模板所需的格式化与必要的上下文补充，不要用宿主模型的独立判断替换它。只有任务明确不需要外部模型、或 CLI 缺失/未登录时，才回退宿主模型并在报告中说明（`<role>` 必须绑定为 `atia`）：
 
 ```bash
 bash /Users/suimu/.claude/agents/tools/agent-cli.sh atia "<要提交给外部模型的问题或上下文>"

@@ -857,28 +857,28 @@ assert_cli_dispatch() {
 }
 
 assert_cli_dispatch "wrapper argv: mark -> agy gemini-4-hydrogen-xhigh" "mark" "check user intent" \
-$'bin=agy\narg[0]=--sandbox\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-4-hydrogen-xhigh\narg[4]=--print=check user intent'
+$'bin=agy\narg[0]=--dangerously-skip-permissions\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-4-hydrogen-xhigh\narg[4]=--print=check user intent'
 
 assert_cli_dispatch "wrapper argv: posca -> agy gemini-4-argon-high" "posca" "audit plan" \
-$'bin=agy\narg[0]=--sandbox\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-4-argon-high\narg[4]=--print=audit plan'
+$'bin=agy\narg[0]=--dangerously-skip-permissions\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-4-argon-high\narg[4]=--print=audit plan'
 
 assert_cli_dispatch "wrapper argv: vorenus -> agy gemini-pro-orchestrator-neon" "vorenus" "implement fix" \
-$'bin=agy\narg[0]=--sandbox\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-pro-orchestrator-neon\narg[4]=--print=implement fix'
+$'bin=agy\narg[0]=--dangerously-skip-permissions\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-pro-orchestrator-neon\narg[4]=--print=implement fix'
 
 assert_cli_dispatch "wrapper argv: anthory -> agy gemini-pro-orchestrator-neon" "anthory" "coordinate plan" \
-$'bin=agy\narg[0]=--sandbox\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-pro-orchestrator-neon\narg[4]=--print=coordinate plan'
+$'bin=agy\narg[0]=--dangerously-skip-permissions\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-pro-orchestrator-neon\narg[4]=--print=coordinate plan'
 
 assert_cli_dispatch "wrapper argv: pullo -> agy gemini-pro-orchestrator-neon" "pullo" "fallback implementation" \
-$'bin=agy\narg[0]=--sandbox\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-pro-orchestrator-neon\narg[4]=--print=fallback implementation'
+$'bin=agy\narg[0]=--dangerously-skip-permissions\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-pro-orchestrator-neon\narg[4]=--print=fallback implementation'
 
 assert_cli_dispatch "wrapper argv: octavion -> codex gpt-6.2-sol stdin channel" "octavion" "plan architecture" \
-$'bin=codex\narg[0]=exec\narg[1]=--ignore-user-config\narg[2]=-s\narg[3]=workspace-write\narg[4]=-m\narg[5]=gpt-6.2-sol\narg[6]=-c\narg[7]=model_reasoning_effort=xhigh\narg[8]=-\nstdin=plan architecture'
+$'bin=codex\narg[0]=exec\narg[1]=--ignore-user-config\narg[2]=--dangerously-bypass-approvals-and-sandbox\narg[3]=-m\narg[4]=gpt-6.2-sol\narg[5]=-c\narg[6]=model_reasoning_effort=xhigh\narg[7]=-\nstdin=plan architecture'
 
 assert_cli_dispatch "wrapper argv: atia -> grok grok-4.7 -p last" "atia" "spot check process" \
-$'bin=grok\narg[0]=--sandbox\narg[1]=workspace\narg[2]=--tools\narg[3]=read_file,grep,list_dir,write,search_replace\narg[4]=--model\narg[5]=grok-4.7\narg[6]=-p\narg[7]=spot check process'
+$'bin=grok\narg[0]=--always-approve\narg[1]=--permission-mode\narg[2]=bypassPermissions\narg[3]=--model\narg[4]=grok-4.7\narg[5]=-p\narg[6]=spot check process'
 
 assert_cli_dispatch "wrapper accepts an ordinary prompt that begins with Review" "mark" "Review the patch for intent drift" \
-$'bin=agy\narg[0]=--sandbox\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-4-hydrogen-xhigh\narg[4]=--print=Review the patch for intent drift'
+$'bin=agy\narg[0]=--dangerously-skip-permissions\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-4-hydrogen-xhigh\narg[4]=--print=Review the patch for intent drift'
 
 # Stdin prompt channel works for valid main-session stdin and rejects option/subcommand/slash-command payloads
 rm -f "$SHIM_CAPTURED"

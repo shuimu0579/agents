@@ -7,8 +7,8 @@
 #   bash /Users/suimu/.claude/agents/tools/agent-cli.sh <role> <prompt words...>
 # (or `bash tools/agent-cli.sh <role> <prompt words...>` when cwd is the fleet root)
 # with `<role>` bound to the attributed caller, and this script owns the CLI, the
-# model, and the safety flags. Agents cannot pass extra flags; there is no option
-# passthrough.
+# model, and the permission flags (ADR 0017). Agents cannot pass extra flags; there
+# is no option passthrough.
 #
 # Role -> CLI mapping lives in hooks/lib/executor.sh (single source of truth).
 # Every fleet role maps to a pinned external CLI; the wrapper is the only
@@ -178,20 +178,23 @@ if ! verify_cli_pin "$cli" "$cli_bin"; then
   exit 2
 fi
 
-# Non-interactive invocations using each backend's explicit prompt channel:
-#   agy    --sandbox --disable-slash-commands --model <model> --print=<prompt>
-#   codex  exec --ignore-user-config -s workspace-write -m <model> -c model_reasoning_effort="xhigh" - (prompt on stdin)
-#   grok   --sandbox workspace --tools "read_file,grep,list_dir,write,search_replace" --model <model> -p <prompt>
+# Non-interactive invocations using each backend's explicit prompt channel.
+# ADR 0017: the user approved full host access, so none of the backends runs with a
+# filesystem sandbox or an approval prompt. The wrapper still pins the binary hash,
+# CLI, model and flags; the external turn itself is outside the Claude hooks.
+#   agy    --dangerously-skip-permissions --disable-slash-commands --model <model> --print=<prompt>
+#   codex  exec --ignore-user-config --dangerously-bypass-approvals-and-sandbox -m <model> -c model_reasoning_effort="xhigh" - (prompt on stdin)
+#   grok   --always-approve --permission-mode bypassPermissions --model <model> -p <prompt>
 case "$cli" in
   agy)
-    exec "$cli_bin" --sandbox --disable-slash-commands --model "$model" "--print=$prompt"
+    exec "$cli_bin" --dangerously-skip-permissions --disable-slash-commands --model "$model" "--print=$prompt"
     ;;
   codex)
-    exec "$cli_bin" exec --ignore-user-config -s workspace-write -m "$model" -c model_reasoning_effort="xhigh" - <<< "$prompt"
+    exec "$cli_bin" exec --ignore-user-config --dangerously-bypass-approvals-and-sandbox -m "$model" -c model_reasoning_effort="xhigh" - <<< "$prompt"
     ;;
   grok)
-    # Audit B11 / ADR 0010: pin the built-in tool set (read + workspace write) as
-    # well as the workspace sandbox profile, so project settings cannot widen the tool pool.
-    exec "$cli_bin" --sandbox workspace --tools "read_file,grep,list_dir,write,search_replace" --model "$model" -p "$prompt"
+    # ADR 0017 supersedes ADR 0010's tool/sandbox pin: all built-in tools are
+    # available and approvals are bypassed by explicit user approval.
+    exec "$cli_bin" --always-approve --permission-mode bypassPermissions --model "$model" -p "$prompt"
     ;;
 esac

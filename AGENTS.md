@@ -114,7 +114,7 @@ agents/
 ├── atia.md                    # Process spot check
 ├── vorenus.md                 # Primary implementation
 ├── pullo.md                   # Fallback implementation
-├── adr/                       # MADR architecture decision records (0000–0016)
+├── adr/                       # MADR architecture decision records (0000–0017)
 ├── docs/                      # Domain docs (agent-output-contract.md is synced from tests/fixtures)
 ├── AGENTS.md                  # This file
 ├── tools/                     # agent-cli.sh — pinned external-CLI dispatcher (ADR 0008; Write/Edit self-protected)
@@ -176,8 +176,9 @@ Every fleet role (`mark`, `octavion`, `posca`, `atia`, `vorenus`, `anthory`,
 `pullo`) is mapped to a pinned external CLI. The role's **first step** on a task is
 to call its bound `tools/agent-cli.sh <role>` route with the task text and known
 context, before reading repository files or forming its own conclusion. The
-external CLI inherits the working directory and has its own tools/sandbox, so it
-does the main analysis and work. The host-model agent then relays its output as
+external CLI inherits the working directory and has its own tools and full host
+permissions (ADR 0017), so it does the main analysis and work. The host-model
+agent then relays its output as
 the report body, adding only the report template and clearly-labelled minimal
 supplements; it must not substitute its own independent judgment. Fall back to the
 host model only when the task explicitly does not need the external model or the
@@ -194,8 +195,13 @@ contributed.
   never `sh`; `<role>` must equal the attributed `agent_type`; symlinks and outside-fleet
   aliases are rejected). The wrapper resolves `agy`/`codex`/`grok` to a verified
   physical path outside `${FLEET_ROOT}` and `/tmp`, checks the binary's SHA-256
-  against `tools/cli-sha256` before `exec`, and pins the CLI, model and safety flags
-  (ADR 0008). It refuses option-looking (`-*`), slash-command (`/*`) and blank
+  against `tools/cli-sha256` before `exec`, and pins the CLI, model and permission
+  flags (ADR 0008 / 0017). Since ADR 0017 those flags grant full host access — agy
+  `--dangerously-skip-permissions`, codex
+  `--dangerously-bypass-approvals-and-sandbox`, grok
+  `--always-approve --permission-mode bypassPermissions` — with no filesystem
+  sandbox or approval prompt; the external turn is outside the Claude hooks. It
+  refuses option-looking (`-*`), slash-command (`/*`) and blank
   prompts; a word that happens to name a vendor subcommand is ordinary prompt data.
   A CLI upgrade fails closed until the pin is refreshed with
   `bash tools/pin-clis.sh` (verify with `bash tools/pin-clis.sh --check`).

@@ -71,7 +71,7 @@ disallowedTools: Agent
 
 计划应让 Posca 能按验收标准审核，让 Vorenus 能按步骤执行。保留检索与核验痕迹。
 
-**默认外部模型（ADR 0008 / 0010 / 0016）：Codex CLI `codex exec --ignore-user-config -s workspace-write -m gpt-6.2-sol -c model_reasoning_effort="xhigh" -`（prompt 走 stdin）。** 收到任务后的第一步（在读任何仓库文件或形成自己的判断之前），执行钉死的绝对路径包装脚本，把用户任务原文、cwd/仓库路径与已知上下文交给外部模型；由它使用自己的工具与沙箱完成主要工作。返回后，把它的输出作为报告主体，只做模板所需的格式化与必要的上下文补充，不要用宿主模型的独立判断替换它。只有任务明确不需要外部模型、或 CLI 缺失/未登录时，才回退宿主模型并在报告中说明（`<role>` 必须绑定为 `octavion`）：
+**默认外部模型（ADR 0008 / 0016 / 0017）：Codex CLI `codex exec --ignore-user-config --dangerously-bypass-approvals-and-sandbox -m gpt-6.2-sol -c model_reasoning_effort="xhigh" -`（prompt 走 stdin）。** 收到任务后的第一步（在读任何仓库文件或形成自己的判断之前），执行钉死的绝对路径包装脚本，把用户任务原文、cwd/仓库路径与已知上下文交给外部模型；由它使用自己的工具与完整主机权限完成主要工作。返回后，把它的输出作为报告主体，只做模板所需的格式化与必要的上下文补充，不要用宿主模型的独立判断替换它。只有任务明确不需要外部模型、或 CLI 缺失/未登录时，才回退宿主模型并在报告中说明（`<role>` 必须绑定为 `octavion`）：
 
 ```bash
 bash /Users/suimu/.claude/agents/tools/agent-cli.sh octavion "<要提交给外部模型的问题或上下文>"
