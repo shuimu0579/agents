@@ -94,7 +94,9 @@ the host stamps one of those identity fields on subagent Write events.
 | `vorenus` | Primary implementation; writes code and runs tests | Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch | inherit | executor |
 | `pullo` | Fallback implementation, only when Vorenus is explicitly out of quota | Read, Write, Edit, Bash, Grep, Glob, WebSearch, WebFetch | inherit | executor |
 
-All seven pin `model: inherit`; no agent selects an external CLI model.
+All seven pin `model: inherit`; the `model:` field never selects an external CLI
+model. External models are reached only through each role's bound wrapper route
+(ADR 0016).
 
 The six legacy roles (`architect`, `code-reviewer`, `security-reviewer`,
 `e2e-runner`, `_xixi`, `_critical_thinking`) are retired: their definitions and
@@ -112,7 +114,7 @@ agents/
 ├── atia.md                    # Process spot check
 ├── vorenus.md                 # Primary implementation
 ├── pullo.md                   # Fallback implementation
-├── adr/                       # MADR architecture decision records (0000–0015)
+├── adr/                       # MADR architecture decision records (0000–0016)
 ├── docs/                      # Domain docs (agent-output-contract.md is synced from tests/fixtures)
 ├── AGENTS.md                  # This file
 ├── tools/                     # agent-cli.sh — pinned external-CLI dispatcher (ADR 0008; Write/Edit self-protected)
@@ -162,11 +164,27 @@ Column 5 of the contract is one of:
   parser/approval test coverage; no live role uses it.
 - `executor` — Write/Edit plus Bash, with the execution-only allowlist in
   `hooks/lib/executor.sh` (ADR 0006) plus the bound `tools/agent-cli.sh <role>` route
-  for mapped executor roles (`posca`, `vorenus`; ADR 0008).
+  for the mapped executor roles (`posca`, `vorenus`, `pullo`; ADR 0008 / 0016).
 - `orchestrator` — Write/Edit plus Bash with the executor allowlist, and standing
   git write authority including `push`/`reset --hard`/`clean` (ADR 0007). `anthory`
   has its own bound `tools/agent-cli.sh anthory` route to agy Orchestrator (Neon)
-  (ADR 0015); `pullo` has no external CLI mapping and is denied the wrapper route.
+  (ADR 0015).
+
+### External CLI first (ADR 0016)
+
+Every fleet role (`mark`, `octavion`, `posca`, `atia`, `vorenus`, `anthory`,
+`pullo`) is mapped to a pinned external CLI. The role's **first step** on a task is
+to call its bound `tools/agent-cli.sh <role>` route with the task text and known
+context, before reading repository files or forming its own conclusion. The
+external CLI inherits the working directory and has its own tools/sandbox, so it
+does the main analysis and work. The host-model agent then relays its output as
+the report body, adding only the report template and clearly-labelled minimal
+supplements; it must not substitute its own independent judgment. Fall back to the
+host model only when the task explicitly does not need the external model or the
+CLI is missing/unauthenticated, and state the fallback. `model: inherit` is
+unchanged: this is a dispatch rule, not a model swap. The rule is instruction-level;
+the role's report should say whether the external call happened and what it
+contributed.
 
 ### Bash policy
 
@@ -183,9 +201,9 @@ Column 5 of the contract is one of:
   `bash tools/pin-clis.sh` (verify with `bash tools/pin-clis.sh --check`).
 - Executor roles (`posca`, `vorenus`, `pullo`) run only the allowlist: read commands,
   git read-only, test runners, `python3 -m unittest|json.tool`, this fleet's
-  `tests/*.sh` scripts, and — for mapped executor roles (`posca`, `vorenus`) — their
-  own bound `bash /Users/suimu/.claude/agents/tools/agent-cli.sh <role> "<prompt>"`
-  route. Everything else is denied with `rule:allowlist`.
+  `tests/*.sh` scripts, and their own bound
+  `bash /Users/suimu/.claude/agents/tools/agent-cli.sh <role> "<prompt>"` route.
+  Everything else is denied with `rule:allowlist`.
 - Write/Edit self-protection covers `hooks/`, `tests/`, `scripts/`, `tools/`, any
   `*.md` under the fleet root at any depth, live Claude/Grok settings, `rules/`,
   and `.git`, decided by filesystem identity (`st_dev`/`st_ino`) so an alternate

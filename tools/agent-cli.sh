@@ -11,8 +11,8 @@
 # passthrough.
 #
 # Role -> CLI mapping lives in hooks/lib/executor.sh (single source of truth).
-# anthory defaults to agy Orchestrator (Neon); pullo has no mapping and runs on
-# the host session model.
+# Every fleet role maps to a pinned external CLI; the wrapper is the only
+# admitted path to those models.
 #
 # Prompt: the remaining arguments are joined with spaces. With no arguments the
 # prompt is read from bounded stdin (for the main session; agents cannot redirect).
@@ -135,7 +135,7 @@ fi
 
 route=""
 if ! route="$(exec_agent_cli_route "$role")"; then
-  echo "agent-cli: role has no external CLI mapping (pullo runs on the host session model)" >&2
+  echo "agent-cli: role has no external CLI mapping" >&2
   exit 2
 fi
 cli="${route%%|*}"
