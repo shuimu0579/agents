@@ -139,7 +139,12 @@ if ! route="$(exec_agent_cli_route "$role")"; then
   exit 2
 fi
 cli="${route%%|*}"
-model="${route#*|}"
+model_chain="${route#*|}"
+IFS='|' read -r -a models <<< "$model_chain"
+if [[ "${#models[@]}" -lt 1 || -z "${models[0]:-}" ]]; then
+  echo "agent-cli: role has no external CLI model" >&2
+  exit 2
+fi
 
 # Resolve the target binary to a single physical path before exec.
 # Refuse relative PATH entries, any world-writable or unexpectedly owned
@@ -185,16 +190,79 @@ fi
 #   agy    --dangerously-skip-permissions --disable-slash-commands --model <model> --print=<prompt>
 #   codex  exec --ignore-user-config --dangerously-bypass-approvals-and-sandbox -m <model> -c model_reasoning_effort="xhigh" - (prompt on stdin)
 #   grok   --always-approve --permission-mode bypassPermissions --model <model> -p <prompt>
-case "$cli" in
-  agy)
-    exec "$cli_bin" --dangerously-skip-permissions --disable-slash-commands --model "$model" "--print=$prompt"
-    ;;
-  codex)
-    exec "$cli_bin" exec --ignore-user-config --dangerously-bypass-approvals-and-sandbox -m "$model" -c model_reasoning_effort="xhigh" - <<< "$prompt"
-    ;;
-  grok)
-    # ADR 0017 supersedes ADR 0010's tool/sandbox pin: all built-in tools are
-    # available and approvals are bypassed by explicit user approval.
-    exec "$cli_bin" --always-approve --permission-mode bypassPermissions --model "$model" -p "$prompt"
-    ;;
-esac
+exec_backend() {
+  local model="$1"
+  case "$cli" in
+    agy)
+      exec "$cli_bin" --dangerously-skip-permissions --disable-slash-commands --model "$model" "--print=$prompt"
+      ;;
+    codex)
+      exec "$cli_bin" exec --ignore-user-config --dangerously-bypass-approvals-and-sandbox -m "$model" -c model_reasoning_effort="xhigh" - <<< "$prompt"
+      ;;
+    grok)
+      # ADR 0017 supersedes ADR 0010's tool/sandbox pin: all built-in tools are
+      # available and approvals are bypassed by explicit user approval.
+      exec "$cli_bin" --always-approve --permission-mode bypassPermissions --model "$model" -p "$prompt"
+      ;;
+    *)
+      echo "agent-cli: unknown backend $cli" >&2
+      exit 2
+      ;;
+  esac
+}
+
+# Single-model routes keep the original exec path: no buffering, no temp file.
+if [[ "${#models[@]}" -eq 1 ]]; then
+  exec_backend "${models[0]}"
+fi
+
+# ADR 0018: a route may carry a fallback chain. Each attempt runs the backend once
+# and the first exit 0 wins. A signal exit (>= 128) ends the chain rather than
+# spending another model's quota, and a failed attempt's stdout is discarded so a
+# partial response cannot be mistaken for the answer. The last failure's stdout is
+# surfaced after the chain, where it is the only diagnostic left.
+run_backend() {
+  local model="$1" out="$2"
+  case "$cli" in
+    agy)
+      "$cli_bin" --dangerously-skip-permissions --disable-slash-commands --model "$model" "--print=$prompt" >"$out"
+      ;;
+    codex)
+      "$cli_bin" exec --ignore-user-config --dangerously-bypass-approvals-and-sandbox -m "$model" -c model_reasoning_effort="xhigh" - >"$out" <<< "$prompt"
+      ;;
+    grok)
+      "$cli_bin" --always-approve --permission-mode bypassPermissions --model "$model" -p "$prompt" >"$out"
+      ;;
+    *)
+      return 2
+      ;;
+  esac
+}
+tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/agent-cli.XXXXXX")" || {
+  echo "agent-cli: cannot create attempt directory" >&2
+  exit 2
+}
+trap 'rm -rf -- "$tmpdir"' EXIT
+attempt=0
+rc=0
+for model in "${models[@]}"; do
+  attempt=$((attempt + 1))
+  out="${tmpdir}/attempt-${attempt}.out"
+  run_backend "$model" "$out"
+  rc=$?
+  if [[ "$rc" -eq 0 ]]; then
+    cat -- "$out"
+    exit 0
+  fi
+  if [[ "$rc" -ge 128 ]]; then
+    cat -- "$out"
+    exit "$rc"
+  fi
+  if [[ "$attempt" -lt "${#models[@]}" ]]; then
+    printf 'agent-cli: %s exited %d; trying %s\n' \
+      "$model" "$rc" "${models[$attempt]}" >&2
+  fi
+done
+cat -- "$out"
+printf 'agent-cli: all models failed; last exit %d\n' "$rc" >&2
+exit "$rc"

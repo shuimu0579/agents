@@ -859,14 +859,14 @@ assert_cli_dispatch() {
 assert_cli_dispatch "wrapper argv: mark -> agy gemini-4-hydrogen-xhigh" "mark" "check user intent" \
 $'bin=agy\narg[0]=--dangerously-skip-permissions\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-4-hydrogen-xhigh\narg[4]=--print=check user intent'
 
-assert_cli_dispatch "wrapper argv: posca -> agy gemini-4-argon-high" "posca" "audit plan" \
-$'bin=agy\narg[0]=--dangerously-skip-permissions\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-4-argon-high\narg[4]=--print=audit plan'
+assert_cli_dispatch "wrapper argv: posca -> agy gemini-4-carbon-high" "posca" "audit plan" \
+$'bin=agy\narg[0]=--dangerously-skip-permissions\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-4-carbon-high\narg[4]=--print=audit plan'
 
 assert_cli_dispatch "wrapper argv: vorenus -> agy gemini-pro-orchestrator-neon" "vorenus" "implement fix" \
 $'bin=agy\narg[0]=--dangerously-skip-permissions\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-pro-orchestrator-neon\narg[4]=--print=implement fix'
 
-assert_cli_dispatch "wrapper argv: anthory -> agy gemini-pro-orchestrator-neon" "anthory" "coordinate plan" \
-$'bin=agy\narg[0]=--dangerously-skip-permissions\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-pro-orchestrator-neon\narg[4]=--print=coordinate plan'
+assert_cli_dispatch "wrapper argv: anthory -> agy claude-opus-5-5-high" "anthory" "coordinate plan" \
+$'bin=agy\narg[0]=--dangerously-skip-permissions\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=claude-opus-5-5-high\narg[4]=--print=coordinate plan'
 
 assert_cli_dispatch "wrapper argv: pullo -> agy gemini-pro-orchestrator-neon" "pullo" "fallback implementation" \
 $'bin=agy\narg[0]=--dangerously-skip-permissions\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-pro-orchestrator-neon\narg[4]=--print=fallback implementation'
@@ -879,6 +879,43 @@ $'bin=grok\narg[0]=--always-approve\narg[1]=--permission-mode\narg[2]=bypassPerm
 
 assert_cli_dispatch "wrapper accepts an ordinary prompt that begins with Review" "mark" "Review the patch for intent drift" \
 $'bin=agy\narg[0]=--dangerously-skip-permissions\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-4-hydrogen-xhigh\narg[4]=--print=Review the patch for intent drift'
+
+# ADR 0018: a multi-model route tries the next model after a failed attempt and
+# discards the failed attempt's stdout, so a partial response cannot pass as the answer.
+FB_SHIMS="${HOME}/.cache/fleet-cli-fallback.$$"
+FB_LOG="$TMPD/fallback-log.txt"
+FB_PIN="$TMPD/fallback-cli-sha256"
+mkdir -p "$FB_SHIMS"
+chmod 700 "$FB_SHIMS"
+cat > "$FB_SHIMS/agy" <<'EOF'
+#!/usr/bin/env bash
+model=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "--model" ]; then model="$a"; fi
+  prev="$a"
+done
+printf '%s\n' "$model" >> "$FB_LOG"
+if [ "$model" = "claude-opus-5-5-high" ]; then
+  printf 'primary attempt output\n'
+  exit 1
+fi
+printf 'response from %s\n' "$model"
+EOF
+chmod 755 "$FB_SHIMS/agy"
+printf 'agy %s\n' "$(shasum -a 256 "$FB_SHIMS/agy" | awk '{print $1}')" > "$FB_PIN"
+trap 'rm -rf "$CLI_SHIMS" "$FB_SHIMS"' EXIT
+fb_out="$(PATH="$FB_SHIMS:$PATH" FB_LOG="$FB_LOG" FLEET_CLI_PIN_FILE="$FB_PIN" bash "$REPO_ROOT/tools/agent-cli.sh" anthory "coordinate plan" 2>&1)"
+fb_rc=$?
+fb_models="$(cat "$FB_LOG" 2>/dev/null | tr '\n' ',')"
+if [ "$fb_rc" -eq 0 ] \
+   && [ "$fb_models" = "claude-opus-5-5-high,gemini-pro-orchestrator," ] \
+   && printf '%s' "$fb_out" | grep -qx 'response from gemini-pro-orchestrator' \
+   && ! printf '%s' "$fb_out" | grep -q 'primary attempt output'; then
+  PASS=$((PASS + 1)); echo "PASS  wrapper fallback: failed primary falls through to the next model"
+else
+  FAIL=$((FAIL + 1)); echo "FAIL  wrapper fallback (rc=$fb_rc log=[$fb_models] out=[$fb_out])"
+fi
 
 # Stdin prompt channel works for valid main-session stdin and rejects option/subcommand/slash-command payloads
 rm -f "$SHIM_CAPTURED"

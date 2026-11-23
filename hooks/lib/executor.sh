@@ -332,12 +332,15 @@ exec_is_script_path() {
 #
 # Single source of truth for caller-to-route policy (audit #13): consumed by both
 # the PreToolUse Bash gate and tools/agent-cli.sh.
+# Format: `<cli>|<model>[|<fallback model>...]`. The wrapper tries the models in
+# order and stops at the first exit 0 (ADR 0018). The gate only checks that the
+# role maps; it does not inspect the model chain.
 exec_agent_cli_route() {
   case "${1:-}" in
     mark)     printf 'agy|gemini-4-hydrogen-xhigh\n' ;;
-    posca)    printf 'agy|gemini-4-argon-high\n' ;;
+    posca)    printf 'agy|gemini-4-carbon-high|gemini-pro-orchestrator-neon\n' ;;
     vorenus)  printf 'agy|gemini-pro-orchestrator-neon\n' ;;
-    anthory)  printf 'agy|gemini-pro-orchestrator-neon\n' ;;
+    anthory)  printf 'agy|claude-opus-5-5-high|gemini-pro-orchestrator|gemini-pro-orchestrator-neon\n' ;;
     pullo)    printf 'agy|gemini-pro-orchestrator-neon\n' ;;
     octavion) printf 'codex|gpt-6.2-sol\n' ;;
     atia)     printf 'grok|grok-4.7\n' ;;
