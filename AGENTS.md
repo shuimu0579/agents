@@ -114,7 +114,7 @@ agents/
 ├── atia.md                    # Process spot check
 ├── vorenus.md                 # Primary implementation
 ├── pullo.md                   # Fallback implementation
-├── adr/                       # MADR architecture decision records (0000–0017)
+├── adr/                       # MADR architecture decision records (0000–0019)
 ├── docs/                      # Domain docs (agent-output-contract.md is synced from tests/fixtures)
 ├── AGENTS.md                  # This file
 ├── tools/                     # agent-cli.sh — pinned external-CLI dispatcher (ADR 0008; Write/Edit self-protected)
@@ -203,6 +203,12 @@ contributed.
   sandbox or approval prompt; the external turn is outside the Claude hooks. It
   refuses option-looking (`-*`), slash-command (`/*`) and blank
   prompts; a word that happens to name a vendor subcommand is ordinary prompt data.
+  Since ADR 0019 the wrapper also appends a fixed `--settings` payload whenever the
+  dispatched model is `gemini-pro-orchestrator-neon` (Planner `Gemini 4 Neon
+  (XHigh)`, Executor `Gemini 4 Hydrogen (XHigh)`), because agy rejects `--effort`
+  for Orchestrator models. The payload is keyed by model in
+  `hooks/lib/executor.sh`, so it overrides the host's `/model` choice for every
+  route that dispatches it.
   A CLI upgrade fails closed until the pin is refreshed with
   `bash tools/pin-clis.sh` (verify with `bash tools/pin-clis.sh --check`).
 - Executor roles (`posca`, `vorenus`, `pullo`) run only the allowlist: read commands,
@@ -317,6 +323,7 @@ bash tests/hook-e2e.test.sh
 - To change course, write a new ADR that supersedes the old one; do not rewrite the old Decision Outcome.
 - The Bash authorization decision for the executor roles is ADR 0006.
 - The orchestrator's standing git authority is ADR 0007.
+- The pinned `gemini-pro-orchestrator-neon` effort block is ADR 0019.
 
 ## Agent skills
 

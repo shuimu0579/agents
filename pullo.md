@@ -71,7 +71,7 @@ disallowedTools: Agent
 
 证据须可被 Posca 独立复跑。仓库约束与 Vorenus 相同。
 
-**默认外部模型（ADR 0008 / 0016 / 0017）：`agy --dangerously-skip-permissions --disable-slash-commands --model gemini-pro-orchestrator-neon --print="<prompt>"`（Orchestrator Neon）。** 收到任务后的第一步（在读任何仓库文件或形成自己的判断之前），执行钉死的绝对路径包装脚本，把用户任务原文、cwd/仓库路径与已知上下文交给外部模型；由它使用自己的工具与完整主机权限完成主要工作。返回后，把它的输出作为报告主体，只做模板所需的格式化与必要的上下文补充，不要用宿主模型的独立判断替换它。只有任务明确不需要外部模型、或 CLI 缺失/未登录时，才回退宿主模型并在报告中说明（`<role>` 必须绑定为 `pullo`）：
+**默认外部模型（ADR 0008 / 0016 / 0017 / 0019）：`agy --dangerously-skip-permissions --disable-slash-commands --model gemini-pro-orchestrator-neon --settings '{"orchestrator":{"planner":"Gemini 4 Neon (XHigh)","executor":"Gemini 4 Hydrogen (XHigh)"}}' --print="<prompt>"`（Orchestrator Neon；planner / executor effort 固定在 xhigh）。** 收到任务后的第一步（在读任何仓库文件或形成自己的判断之前），执行钉死的绝对路径包装脚本，把用户任务原文、cwd/仓库路径与已知上下文交给外部模型；由它使用自己的工具与完整主机权限完成主要工作。返回后，把它的输出作为报告主体，只做模板所需的格式化与必要的上下文补充，不要用宿主模型的独立判断替换它。只有任务明确不需要外部模型、或 CLI 缺失/未登录时，才回退宿主模型并在报告中说明（`<role>` 必须绑定为 `pullo`）：
 
 ```bash
 bash /Users/suimu/.claude/agents/tools/agent-cli.sh pullo "<要提交给外部模型的问题或上下文>"

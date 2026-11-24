@@ -856,20 +856,24 @@ assert_cli_dispatch() {
   fi
 }
 
+# ADR 0019: agy Orchestrator models get a pinned `--settings` payload instead of
+# `--effort` (which agy rejects for them).
+ORCH_SETTINGS='{"orchestrator":{"planner":"Gemini 4 Neon (XHigh)","executor":"Gemini 4 Hydrogen (XHigh)"}}'
+
 assert_cli_dispatch "wrapper argv: mark -> agy gemini-4-hydrogen-xhigh" "mark" "check user intent" \
 $'bin=agy\narg[0]=--dangerously-skip-permissions\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-4-hydrogen-xhigh\narg[4]=--print=check user intent'
 
 assert_cli_dispatch "wrapper argv: posca -> agy gemini-4-carbon-high" "posca" "audit plan" \
 $'bin=agy\narg[0]=--dangerously-skip-permissions\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-4-carbon-high\narg[4]=--print=audit plan'
 
-assert_cli_dispatch "wrapper argv: vorenus -> agy gemini-pro-orchestrator-neon" "vorenus" "implement fix" \
-$'bin=agy\narg[0]=--dangerously-skip-permissions\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-pro-orchestrator-neon\narg[4]=--print=implement fix'
+assert_cli_dispatch "wrapper argv: vorenus -> agy gemini-pro-orchestrator-neon --settings" "vorenus" "implement fix" \
+$'bin=agy\narg[0]=--dangerously-skip-permissions\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-pro-orchestrator-neon\narg[4]=--settings\narg[5]='"$ORCH_SETTINGS"$'\narg[6]=--print=implement fix'
 
 assert_cli_dispatch "wrapper argv: anthory -> agy claude-opus-5-5-high" "anthory" "coordinate plan" \
 $'bin=agy\narg[0]=--dangerously-skip-permissions\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=claude-opus-5-5-high\narg[4]=--print=coordinate plan'
 
-assert_cli_dispatch "wrapper argv: pullo -> agy gemini-pro-orchestrator-neon" "pullo" "fallback implementation" \
-$'bin=agy\narg[0]=--dangerously-skip-permissions\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-pro-orchestrator-neon\narg[4]=--print=fallback implementation'
+assert_cli_dispatch "wrapper argv: pullo -> agy gemini-pro-orchestrator-neon --settings" "pullo" "fallback implementation" \
+$'bin=agy\narg[0]=--dangerously-skip-permissions\narg[1]=--disable-slash-commands\narg[2]=--model\narg[3]=gemini-pro-orchestrator-neon\narg[4]=--settings\narg[5]='"$ORCH_SETTINGS"$'\narg[6]=--print=fallback implementation'
 
 assert_cli_dispatch "wrapper argv: octavion -> codex gpt-6.2-sol stdin channel" "octavion" "plan architecture" \
 $'bin=codex\narg[0]=exec\narg[1]=--ignore-user-config\narg[2]=--dangerously-bypass-approvals-and-sandbox\narg[3]=-m\narg[4]=gpt-6.2-sol\narg[5]=-c\narg[6]=model_reasoning_effort=xhigh\narg[7]=-\nstdin=plan architecture'
@@ -882,6 +886,8 @@ $'bin=agy\narg[0]=--dangerously-skip-permissions\narg[1]=--disable-slash-command
 
 # ADR 0018: a multi-model route tries the next model after a failed attempt and
 # discards the failed attempt's stdout, so a partial response cannot pass as the answer.
+# ADR 0019: the pinned settings payload applies per attempt, so only the neon
+# fallback carries --settings; the earlier models in the chain carry none.
 FB_SHIMS="${HOME}/.cache/fleet-cli-fallback.$$"
 FB_LOG="$TMPD/fallback-log.txt"
 FB_PIN="$TMPD/fallback-cli-sha256"
@@ -890,16 +896,20 @@ chmod 700 "$FB_SHIMS"
 cat > "$FB_SHIMS/agy" <<'EOF'
 #!/usr/bin/env bash
 model=""
+settings=""
 prev=""
 for a in "$@"; do
   if [ "$prev" = "--model" ]; then model="$a"; fi
+  if [ "$prev" = "--settings" ]; then settings="$a"; fi
   prev="$a"
 done
-printf '%s\n' "$model" >> "$FB_LOG"
-if [ "$model" = "claude-opus-5-5-high" ]; then
-  printf 'primary attempt output\n'
-  exit 1
-fi
+printf '%s:%s\n' "$model" "$settings" >> "$FB_LOG"
+case "$model" in
+  claude-opus-5-5-high|gemini-pro-orchestrator)
+    printf 'failed attempt output from %s\n' "$model"
+    exit 1
+    ;;
+esac
 printf 'response from %s\n' "$model"
 EOF
 chmod 755 "$FB_SHIMS/agy"
@@ -909,10 +919,10 @@ fb_out="$(PATH="$FB_SHIMS:$PATH" FB_LOG="$FB_LOG" FLEET_CLI_PIN_FILE="$FB_PIN" b
 fb_rc=$?
 fb_models="$(cat "$FB_LOG" 2>/dev/null | tr '\n' ',')"
 if [ "$fb_rc" -eq 0 ] \
-   && [ "$fb_models" = "claude-opus-5-5-high,gemini-pro-orchestrator," ] \
-   && printf '%s' "$fb_out" | grep -qx 'response from gemini-pro-orchestrator' \
-   && ! printf '%s' "$fb_out" | grep -q 'primary attempt output'; then
-  PASS=$((PASS + 1)); echo "PASS  wrapper fallback: failed primary falls through to the next model"
+   && [ "$fb_models" = "claude-opus-5-5-high:,gemini-pro-orchestrator:,gemini-pro-orchestrator-neon:${ORCH_SETTINGS}," ] \
+   && printf '%s' "$fb_out" | grep -qx 'response from gemini-pro-orchestrator-neon' \
+   && ! printf '%s' "$fb_out" | grep -q 'failed attempt output'; then
+  PASS=$((PASS + 1)); echo "PASS  wrapper fallback: failed attempts fall through, neon attempt carries --settings"
 else
   FAIL=$((FAIL + 1)); echo "FAIL  wrapper fallback (rc=$fb_rc log=[$fb_models] out=[$fb_out])"
 fi

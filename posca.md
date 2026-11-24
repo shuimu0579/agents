@@ -70,7 +70,7 @@ disallowedTools: Agent
 
 方案审核通过后，主会话才应派 Vorenus 执行；成果审核通过后，交 Anthory 向老吴交付。保留历史记录，不覆盖其他角色的证据目录。
 
-**默认外部模型（ADR 0008 / 0016 / 0017 / 0018）：`agy --dangerously-skip-permissions --disable-slash-commands --model gemini-4-carbon-high --print="<prompt>"`（Gemini 4 Carbon High）。主模型失败时包装脚本按序回退 `gemini-pro-orchestrator-neon`（Orchestrator Neon）。** 收到任务后的第一步（在读任何仓库文件或形成自己的判断之前），执行钉死的绝对路径包装脚本，把用户任务原文、cwd/仓库路径与已知上下文交给外部模型；由它使用自己的工具与完整主机权限完成主要工作。返回后，把它的输出作为报告主体，只做模板所需的格式化与必要的上下文补充，不要用宿主模型的独立判断替换它。只有任务明确不需要外部模型、或 CLI 缺失/未登录时，才回退宿主模型并在报告中说明（`<role>` 必须绑定为 `posca`）：
+**默认外部模型（ADR 0008 / 0016 / 0017 / 0018 / 0019）：`agy --dangerously-skip-permissions --disable-slash-commands --model gemini-4-carbon-high --print="<prompt>"`（Gemini 4 Carbon High）。主模型失败时包装脚本按序回退 `gemini-pro-orchestrator-neon`（Orchestrator Neon，附加固定 `--settings`：planner `Gemini 4 Neon (XHigh)`、executor `Gemini 4 Hydrogen (XHigh)`）。** 收到任务后的第一步（在读任何仓库文件或形成自己的判断之前），执行钉死的绝对路径包装脚本，把用户任务原文、cwd/仓库路径与已知上下文交给外部模型；由它使用自己的工具与完整主机权限完成主要工作。返回后，把它的输出作为报告主体，只做模板所需的格式化与必要的上下文补充，不要用宿主模型的独立判断替换它。只有任务明确不需要外部模型、或 CLI 缺失/未登录时，才回退宿主模型并在报告中说明（`<role>` 必须绑定为 `posca`）：
 
 ```bash
 bash /Users/suimu/.claude/agents/tools/agent-cli.sh posca "<要提交给外部模型的问题或上下文>"

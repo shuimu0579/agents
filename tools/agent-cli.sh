@@ -187,14 +187,32 @@ fi
 # ADR 0017: the user approved full host access, so none of the backends runs with a
 # filesystem sandbox or an approval prompt. The wrapper still pins the binary hash,
 # CLI, model and flags; the external turn itself is outside the Claude hooks.
-#   agy    --dangerously-skip-permissions --disable-slash-commands --model <model> --print=<prompt>
+#   agy    --dangerously-skip-permissions --disable-slash-commands --model <model> [--settings <json>] --print=<prompt>
 #   codex  exec --ignore-user-config --dangerously-bypass-approvals-and-sandbox -m <model> -c model_reasoning_effort="xhigh" - (prompt on stdin)
 #   grok   --always-approve --permission-mode bypassPermissions --model <model> -p <prompt>
+#
+# ADR 0019: agy Orchestrator models get their planner/executor effort from a
+# `--settings` payload pinned in hooks/lib/executor.sh, because agy rejects
+# `--effort` for those models. Shared by the single-model exec path and the
+# fallback-chain path so the two cannot drift.
+run_agy() {
+  local model="$1" out="${2:-}" settings
+  set -- --dangerously-skip-permissions --disable-slash-commands --model "$model"
+  if settings="$(exec_agent_cli_model_settings "$model")"; then
+    set -- "$@" --settings "$settings"
+  fi
+  set -- "$@" "--print=$prompt"
+  if [[ -n "$out" ]]; then
+    "$cli_bin" "$@" >"$out"
+  else
+    exec "$cli_bin" "$@"
+  fi
+}
 exec_backend() {
   local model="$1"
   case "$cli" in
     agy)
-      exec "$cli_bin" --dangerously-skip-permissions --disable-slash-commands --model "$model" "--print=$prompt"
+      run_agy "$model"
       ;;
     codex)
       exec "$cli_bin" exec --ignore-user-config --dangerously-bypass-approvals-and-sandbox -m "$model" -c model_reasoning_effort="xhigh" - <<< "$prompt"
@@ -225,7 +243,7 @@ run_backend() {
   local model="$1" out="$2"
   case "$cli" in
     agy)
-      "$cli_bin" --dangerously-skip-permissions --disable-slash-commands --model "$model" "--print=$prompt" >"$out"
+      run_agy "$model" "$out"
       ;;
     codex)
       "$cli_bin" exec --ignore-user-config --dangerously-bypass-approvals-and-sandbox -m "$model" -c model_reasoning_effort="xhigh" - >"$out" <<< "$prompt"

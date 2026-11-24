@@ -348,6 +348,21 @@ exec_agent_cli_route() {
   esac
 }
 
+# ADR 0019: agy Orchestrator models take their reasoning effort from the
+# `orchestrator` settings block, not from `--effort` (agy rejects `--effort` for
+# these models). The wrapper passes this block with `--settings` so the pinned
+# effort lives in the repository instead of the user's global settings.
+# Keyed by model, so every route that dispatches it gets the same configuration;
+# the values are the display names agy's `/model` picker writes.
+exec_agent_cli_model_settings() {
+  case "${1:-}" in
+    gemini-pro-orchestrator-neon)
+      printf '%s\n' '{"orchestrator":{"planner":"Gemini 4 Neon (XHigh)","executor":"Gemini 4 Hydrogen (XHigh)"}}'
+      ;;
+    *) return 1 ;;
+  esac
+}
+
 exec_agent_cli_roles() {
   printf 'mark octavion posca atia vorenus anthory pullo'
 }
